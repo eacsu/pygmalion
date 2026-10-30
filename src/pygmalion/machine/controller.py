@@ -5,14 +5,13 @@ from __future__ import annotations
 import functools
 import logging
 import math
-import re
 import threading
 from contextlib import contextmanager
 from typing import Any
 
 from ..config import CONFIG
 from . import grbl
-from .errors import MachineError
+from .errors import ExecutionCancelled, ExecutionRejected, MachineError
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,7 @@ def device_guard(function):
     @functools.wraps(function)
     def guarded(controller, *args, session=None, **kwargs):
         with controller.operation(
-            session=session, reuse=function.__name__ in ("inspect", "jog")
+            session=session, reuse=function.__name__ in ("inspect", "jog", "backup")
         ):
             return function(controller, *args, **kwargs)
 
@@ -80,15 +79,37 @@ class DeviceController:
             return True
         return False
 
+    def priority_stop(self):
+        """急停通道不等待普通操作锁。"""
+        return self.emergency_interrupt()
+
     def stop(self):
         self.close_manual_connection()
 
     def send_program(self, machine, program, *, submission_id, on_progress, cancelled):
+        started = False
+        anchor = machine.get("execution_position", machine.get("pen_anchor_position"))
+        if anchor is not None and (
+            self._manual_link is None
+            or not self._manual_link.is_open
+            or self._manual_key != (machine["port"], machine["baud"])
+        ):
+            raise ExecutionRejected("笔头定位连接已改变，请重新开始书写以读取当前位置")
         try:
-            with self.device_connection(machine) as link:
+            with self.device_connection(machine, reuse=anchor is not None) as link:
                 self._link = link
+                if anchor is not None:
+                    current = link.work_position()
+                    if any(
+                        abs(a - b) > 0.01 for a, b in zip(current, anchor, strict=True)
+                    ):
+                        raise grbl.GrblError("实际笔头已移动，请重新开始书写以更新定位")
                 grbl.ensure_backup_today(link, reason=f"书写投稿 #{submission_id}")
-                link.recover_if_stuck(pen_up_z=machine["z_off"])
+                if link.status().get("state") != "Idle":
+                    raise ExecutionRejected("机器未处于 Idle，请显式恢复设备后重新提交")
+                if cancelled():
+                    raise grbl.ConfirmedCancellation("任务尚未发送，已取消")
+                started = True
                 link.run_program(
                     program,
                     on_progress=on_progress,
@@ -97,9 +118,25 @@ class DeviceController:
                 )
                 link.wait_idle(timeout=300)
                 if cancelled():
-                    raise grbl.CancelledError("任务已中止，缓冲区动作已结束")
+                    raise grbl.ConfirmedCancellation("任务已中止，缓冲区动作已结束")
+        except grbl.ConfirmedCancellation as exc:
+            raise ExecutionCancelled(str(exc)) from exc
+        except Exception as exc:
+            if not started:
+                raise ExecutionRejected(str(exc)) from exc
+            raise
         finally:
             self._link = None
+
+    def read_anchor_position(self):
+        """读取并保留定位连接，入队和执行之间不重新打开串口使坐标失效。"""
+        try:
+            with self.device_connection(CONFIG["machine"], reuse=True) as link:
+                position = link.work_position()
+                self._manual_key = (link.port, int(CONFIG["machine"]["baud"]))
+                return {"position": position, "port": link.port}
+        except (OSError, grbl.GrblError) as exc:
+            raise ValueError(f"无法读取笔头定位：{exc}") from exc
 
     def close_manual_connection(self) -> None:
         """在设备锁内释放手动控制连接，供扫描、换端口或书写接管。"""
@@ -151,30 +188,6 @@ class DeviceController:
                 self.close_manual_connection()
                 raise
 
-    def estop(self, data):
-        """
-        急停。立即停下并**确保机器不会卡在 Hold**。
-
-        和「中止」的区别：
-          中止   停止发送新指令，让已经排进缓冲区的运动走完（几秒钟），
-                 位置不丢、文件可续写。日常用这个。
-          急停   立刻停，丢弃未完成的运动，笔可能停在半路。出事时用这个。
-
-        两种情况都不会把机器留在 Hold 状态 —— 那是之前的 bug，会让机器
-        "按了没反应"。
-        """
-        m = CONFIG["machine"]
-        if self.emergency_interrupt():
-            return {"ok": True, "state": "急停指令已发送，请重新读取设备状态并对位"}
-        try:
-            with grbl.GrblLink(m["port"], m["baud"], timeout=2.0) as link:
-                state = link.emergency_stop(pen_up_z=m["z_off"])
-            return {"ok": True, "state": state}
-        except Exception as exc:  # noqa: BLE001 — 将操作失败转换成既有错误响应
-            raise MachineError(
-                "unavailable", {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-            )
-
     @device_guard
     def recover(self, data):
         """
@@ -209,76 +222,6 @@ class DeviceController:
         }
 
     @device_guard
-    def set_serial_port(self, data):
-        """保存手动选择的串口，或保存 `auto` 让书写前自动识别 GRBL。"""
-        data = data or {}
-        port = str(data.get("port") or "").strip()
-        if not port:
-            raise MachineError("invalid", {"ok": False, "error": "请选择串口"})
-        if port.casefold() == "auto":
-            port = "auto"
-        elif not re.fullmatch("COM[1-9][0-9]*", port, flags=re.IGNORECASE):
-            raise MachineError(
-                "invalid", {"ok": False, "error": "串口格式应为 COM 加数字，例如 COM8"}
-            )
-        else:
-            port = port.upper()
-        from .. import config as config_mod
-
-        config_mod.save_section("machine", {"port": port})
-        return {"ok": True, "port": port}
-
-    @device_guard
-    def detect_serial_port(self, data):
-        """显式扫描并以 `$I` 只读识别 GRBL；书写中绝不探测。"""
-        if self.busy():
-            raise MachineError(
-                "busy",
-                {"ok": False, "error": "机器正在书写，不能扫描串口；请等待任务结束"},
-            )
-        baud = int(CONFIG["machine"].get("baud", 115200))
-        checked = grbl.probe_grbl_ports(baud)
-        matches = [item for item in checked if item.get("grbl")]
-        if len(matches) != 1:
-            if not matches:
-                failures = [
-                    f"{item['device']}：{item.get('error') or '未识别到 GRBL'}"
-                    for item in checked
-                    if not item.get("skipped")
-                ]
-                detail = (
-                    "；".join(failures)
-                    if failures
-                    else "没有可扫描的有线串口；蓝牙设备请手动选择"
-                )
-                raise MachineError(
-                    "not_found",
-                    {
-                        "ok": False,
-                        "error": f"未检测到可响应的 GRBL 设备：{detail}",
-                        "ports": checked,
-                    },
-                )
-            raise MachineError(
-                "busy",
-                {
-                    "ok": False,
-                    "error": "检测到多个 GRBL 设备，请手动选择",
-                    "ports": checked,
-                },
-            )
-        port = str(matches[0]["device"])
-        from .. import config as config_mod
-
-        config_mod.save_section("machine", {"port": port})
-        return {
-            "ok": True,
-            "port": port,
-            "ports": checked,
-            "firmware": matches[0].get("firmware", ""),
-        }
-
-    @device_guard
     def inspect(self):
         """
         查询机器状态。只读 —— 发 $$ 和 ? 不会让机器动。
@@ -307,7 +250,7 @@ class DeviceController:
                     "ok": False,
                     "port": m["port"],
                     "error": f"{type(exc).__name__}: {exc}",
-                    "hint": "检查：kdraw 是否已完全退出（串口独占）、USB 是否插好、COM 口号是否变了",
+                    "hint": "检查：kdraw 是否已完全退出（串口独占）、USB 是否插好、串口名称是否变了、当前用户是否有串口访问权限",
                 },
             )
 
@@ -386,43 +329,10 @@ class DeviceController:
         """
         m = CONFIG["machine"]
         try:
-            with grbl.GrblLink(m["port"], m["baud"], timeout=2.0) as link:
+            with self.device_connection(m, reuse=True) as link:
                 path = grbl.backup_settings(link, reason="管理页手动备份")
             return {"ok": True, "path": str(path)}
         except Exception as exc:  # noqa: BLE001 — 将操作失败转换成既有错误响应
-            raise MachineError(
-                "unavailable", {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-            )
-
-    @device_guard
-    def write_settings(self, data):
-        """默认离线预览；明确确认后备份并写入真实控制板。"""
-        changes = data.get("changes")
-        if not isinstance(changes, dict) or not changes:
-            raise MachineError("invalid", {"ok": False, "error": "没有要修改的参数"})
-        if "confirm" in data and (not isinstance(data["confirm"], bool)):
-            raise MachineError(
-                "invalid", {"ok": False, "error": "确认字段必须为布尔值"}
-            )
-        try:
-            commands = grbl.settings_commands(changes)
-        except ValueError as exc:
-            raise MachineError("invalid", {"ok": False, "error": str(exc)})
-        if data.get("confirm") is not True:
-            return {
-                "ok": True,
-                "dry_run": True,
-                "will_send": commands,
-                "note": "预览未写入控制板",
-            }
-        machine = CONFIG["machine"]
-        try:
-            with grbl.GrblLink(machine["port"], machine["baud"], timeout=2) as link:
-                path = link.backup(reason=f"修改参数 {list(changes)}")
-                result = link.write_settings(changes, dry_run=False)
-            return {"ok": True, "dry_run": False, "backup": str(path), "result": result}
-        except Exception as exc:
-            logger.exception("控制板参数写入失败")
             raise MachineError(
                 "unavailable", {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
             )

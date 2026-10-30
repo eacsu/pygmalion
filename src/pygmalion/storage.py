@@ -18,9 +18,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Iterator
 
 from .config import DATA_DIR
 
@@ -64,7 +64,7 @@ JOB_STATUSES = ("queued", "printing", "done", "failed", "cancelled")
 
 def now() -> str:
     """本地时间的 ISO 字符串，精确到秒。"""
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
 @contextmanager
@@ -122,3 +122,40 @@ def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)
+
+
+class RuntimeLock:
+    """一个运行数据目录只允许一个设备执行进程。"""
+
+    def __init__(self):
+        self.file = None
+
+    def acquire(self):
+        import os
+
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(str(DB_PATH) + ".runtime-lock", "a+b")  # noqa: SIM115 — 锁文件由 release() 跨生命周期关闭
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                if handle.tell() == 0:
+                    handle.write(b"0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            handle.close()
+            raise RuntimeError(
+                "同一运行目录已有设备服务进程，不能启动第二个执行器"
+            ) from exc
+        self.file = handle
+
+    def release(self):
+        if self.file:
+            self.file.close()
+            self.file = None

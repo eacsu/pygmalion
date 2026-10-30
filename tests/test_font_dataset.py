@@ -1,6 +1,6 @@
-import pytest
 from pathlib import Path
 
+import pytest
 from datasets import load_dataset
 
 from pygmalion.fonts import registry as fonts
@@ -46,7 +46,9 @@ def test_parquet_font_discovery_and_stroke_boundaries(tmp_path):
 
 def test_only_datasets_are_discovered_and_no_generated_fallback(tmp_path):
     import json
+
     import pytest
+
     from pygmalion.fonts.sources import source_from_dir
 
     legacy = tmp_path / "data" / "fonts"
@@ -63,6 +65,7 @@ def test_only_datasets_are_discovered_and_no_generated_fallback(tmp_path):
 
 def test_dataset_selection_and_fallback_include_punctuation(tmp_path, monkeypatch):
     from datasets import Dataset
+
     from pygmalion import config
     from pygmalion.fonts.sources import source_from_dir
 
@@ -84,6 +87,7 @@ def test_dataset_selection_and_fallback_include_punctuation(tmp_path, monkeypatc
 @pytest.mark.parametrize("directory", ["shared-fonts", "absolute", "", None])
 def test_configured_font_directory(tmp_path, monkeypatch, directory):
     from datasets import Dataset
+
     from pygmalion.fonts.registry import dataset_dir
     from pygmalion.fonts.sources import source_from_dir
 
@@ -114,6 +118,7 @@ def test_configured_font_directory(tmp_path, monkeypatch, directory):
 @pytest.mark.parametrize("duplicate", [False, True])
 def test_recursive_discovery_resolves_real_dataset_paths(tmp_path, duplicate):
     from datasets import Dataset
+
     from pygmalion.fonts.sources import source_from_dir
 
     base = tmp_path / "model-bin"
@@ -136,3 +141,26 @@ def test_recursive_discovery_resolves_real_dataset_paths(tmp_path, duplicate):
         assert "dataset_path" not in font.to_dict()
     if not duplicate:
         assert available[0].id == "cjk-medians"
+
+
+def test_oversized_glyph_fits_em_without_changing_aspect_or_stroke_order(tmp_path):
+    from datasets import Dataset
+
+    path = tmp_path / "train.parquet"
+    Dataset.from_list(
+        [
+            {
+                "char": "今",
+                "lengths": [2, 2],
+                "x": [-6000, 6000, 0, 3000],
+                "y": [-3000, 3000, 0, 1500],
+            },
+            {"char": "一", "lengths": [2], "x": [-3000, 3000], "y": [2000, 2000]},
+        ]
+    ).to_parquet(path)
+    source = CJKSource(path)
+    expected = [[(-0.5, -0.25), (0.5, 0.25)], [(0, 0), (0.25, 0.125)]]
+    for actual, wanted in zip(source.strokes("今"), expected, strict=True):
+        for point, target in zip(actual, wanted, strict=True):
+            assert point == pytest.approx(target)
+    assert source.strokes("一") == [[(-0.3, 0), (0.3, 0)]]

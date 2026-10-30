@@ -19,14 +19,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-import re
-import time
-import threading
 import math
+import re
+import threading
+import time
 from collections import deque
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Self
 
 import serial  # pyserial
 
@@ -40,6 +41,10 @@ RX_BUFFER_MARGIN = 16
 
 class GrblError(RuntimeError):
     """GRBL 返回 error:N 或串口通信失败。"""
+
+
+class CommandRejected(GrblError):
+    """设备明确拒绝了命令。"""
 
 
 class MachineSafetyError(RuntimeError):
@@ -57,6 +62,10 @@ class CancelledError(GrblError):
     单独一个类型是为了让上层能区分"取消"和"出错" —— 取消是正常操作，
     不该在界面上显示成红色错误，也不该把投稿标成 failed。
     """
+
+
+class ConfirmedCancellation(CancelledError):
+    """缓冲区清空并确认 Idle 后的取消。"""
 
 
 # --------------------------------------------------------------------------
@@ -116,7 +125,7 @@ def probe_grbl_ports(
         ser: serial.Serial | None = None
         lines: list[str] = []
         try:
-            # 只读探测仍可能让某些 USB 串口板复位，因此由管理端显式触发，
+            # 只读探测仍可能让某些 USB 串口板复位，因此由工作台在空闲时触发，
             # 且服务有正在书写的任务时会拒绝调用此函数。
             ser = serial.Serial(device, baud, timeout=0.15, write_timeout=1.0)
             time.sleep(0.3)
@@ -192,7 +201,7 @@ def resolve_port(port: str | None, baud: int = 115200) -> str:
 _SETTING_RE = re.compile(r"^\$(\d+|[A-Z]+)=")
 
 
-def backup_settings(link: "GrblLink", reason: str = "manual") -> Path:
+def backup_settings(link: GrblLink, reason: str = "manual") -> Path:
     """
     把机器当前的全部设置导出到 backups/ 目录，返回备份文件路径。
 
@@ -219,7 +228,7 @@ def backup_settings(link: "GrblLink", reason: str = "manual") -> Path:
 
     lines: list[str] = [
         "# GRBL 机器设置备份",
-        f"# 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"# 时间: {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
         f"# 原因: {reason}",
         f"# 端口: {link.port} @ {link.baud}",
         "# 恢复方法: 逐行把下面的 $ 指令发回机器即可（顺序无所谓）",
@@ -243,7 +252,7 @@ def backup_settings(link: "GrblLink", reason: str = "manual") -> Path:
     lines.append("# ---------- 关键参数速查 ----------")
     lines.extend(params or ["# 未能读到任何 $ 参数"])
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     path = BACKUP_DIR / f"grbl-settings-{stamp}.txt"
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -261,7 +270,7 @@ def latest_backup() -> Path | None:
 
 
 def ensure_backup_today(
-    link: "GrblLink", reason: str = "写入前自动备份"
+    link: GrblLink, reason: str = "写入前自动备份"
 ) -> tuple[Path, bool]:
     """
     确保今天已经有一份机器设置备份，有就复用。返回 (路径, 是否新建)。
@@ -273,7 +282,7 @@ def ensure_backup_today(
     **保证没有放松**：任何写入之前，一定有一份当天的完整 `$$` 快照。
     """
     latest = latest_backup()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
     if latest and latest.exists():
         try:
             if today in latest.read_text(encoding="utf-8")[:500]:
@@ -326,7 +335,7 @@ class GrblLink:
 
     # -- 连接管理 ---------------------------------------------------------
 
-    def open(self) -> "GrblLink":
+    def open(self) -> GrblLink:
         """打开串口并等 GRBL 的欢迎信息。"""
         if self._ser and self._ser.is_open:
             return self
@@ -360,7 +369,7 @@ class GrblLink:
         if self._ser and self._ser.is_open:
             self._ser.close()
 
-    def __enter__(self) -> "GrblLink":
+    def __enter__(self) -> Self:
         global _active_link
         link = self.open()
         _active_link = link
@@ -422,7 +431,7 @@ class GrblLink:
             if line == "ok" or line.startswith("ok"):
                 return line
             if line.startswith("error:"):
-                raise GrblError(f"GRBL 错误: {line}")
+                raise CommandRejected(f"GRBL 错误: {line}")
             if line.startswith("ALARM:"):
                 raise AlarmError(
                     f"机器进入 ALARM 状态: {line}（需发 $X 解锁或 $H 归零）"
@@ -461,7 +470,7 @@ class GrblLink:
             if line.startswith("ok"):
                 break
             if line.startswith("error:"):
-                raise GrblError(f"GRBL 错误: {line}")
+                raise CommandRejected(f"GRBL 错误: {line}")
             if line:
                 out.append(line)
         return out
@@ -523,6 +532,42 @@ class GrblLink:
                         out[k] = v
                 return out
         raise GrblError("状态查询超时")
+
+    def work_position(self) -> tuple[float, float]:
+        """只读获取毫米工作坐标，不能把 MPos 当作 G90 所用的 WPos。"""
+        state = self.status()
+        if state.get("state") != "Idle":
+            raise GrblError("笔头定位要求机器处于 Idle 状态")
+        settings = self.query("$$", max_lines=200)
+        units = next(
+            (line.split("=", 1)[1] for line in settings if line.startswith("$13=")),
+            None,
+        )
+        if units not in ("0", "1"):
+            raise GrblError("无法读取位置报告单位，不能确定笔头位置")
+        factor = 25.4 if units == "1" else 1.0
+
+        def xy(value: str) -> tuple[float, float]:
+            try:
+                x, y, *_ = (float(part) * factor for part in value.split(","))
+                if math.isfinite(x) and math.isfinite(y):
+                    return x, y
+            except (ValueError, TypeError):
+                pass
+            raise GrblError("笔头工作坐标无效")
+
+        for attempt in range(32):
+            if attempt:
+                state = self.status()
+            if state.get("state") != "Idle":
+                raise GrblError("机器状态已变化，请停稳后重新开始书写")
+            if "WPos" in state:
+                return xy(state["WPos"])
+            if "MPos" in state and "WCO" in state:
+                position, offset = xy(state["MPos"]), xy(state["WCO"])
+                return position[0] - offset[0], position[1] - offset[1]
+            time.sleep(0.02)
+        raise GrblError("未读取到工作坐标偏移，无法确定笔头位置，请重试")
 
     # -- 暂停 / 恢复 / 急停 --------------------------------------------------
 
@@ -628,9 +673,8 @@ class GrblLink:
 
         # 回到 Idle 之后再抬笔（这时候指令才会被正常处理）。
         # 用 _recover_move 而不是 run_program —— 恢复动作不能被备份闸门挡住。
-        if pen_up_z is not None and self.is_open:
-            if self.state().startswith("Idle"):
-                self._recover_move(f"G0 Z{pen_up_z}")
+        if pen_up_z is not None and self.is_open and self.state().startswith("Idle"):
+            self._recover_move(f"G0 Z{pen_up_z}")
 
         return self.state()
 
@@ -825,7 +869,7 @@ class GrblLink:
 
         if cancelled:
             self._finish_cancel(pen_up_z, idx, total)
-            raise CancelledError(f"用户取消，已停在第 {idx}/{total} 行")
+            raise ConfirmedCancellation(f"用户取消，已停在第 {idx}/{total} 行")
 
         return total
 
@@ -836,17 +880,7 @@ class GrblLink:
         抬笔是为了不让笔一直压在纸上留墨点。等停稳是为了别在机器还在动的时候
         插指令 —— 那会排进缓冲区，在错误的位置执行。
         """
-        try:
+        self.wait_idle(timeout=30.0)
+        if pen_up_z is not None:
+            self.send(f"G0 Z{pen_up_z}")
             self.wait_idle(timeout=30.0)
-            if pen_up_z is not None:
-                self.send(f"G0 Z{pen_up_z}")
-        except GrblError:
-            pass
-
-        # 万一因为别的原因进了 Hold（比如用户同时按了急停），兜底解掉。
-        # 宁可多查一次，也不能留下一台"按了没反应"的机器。
-        try:
-            if self.state().startswith("Hold"):
-                self.clear_hold()
-        except GrblError:
-            pass

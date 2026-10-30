@@ -158,9 +158,23 @@ def table_lines(table: Table, max_segment_mm: float = 5.0) -> list[Stroke]:
     return strokes
 
 
-def prepare_canvas(doc: CanvasDocument) -> tuple[Prepared, bool]:
+def prepare_canvas(
+    doc: CanvasDocument, *, pen_position: tuple[float, float] | None = None
+) -> tuple[Prepared, bool]:
+    if any(
+        element.type != "vector" for element in doc.elements
+    ) and not registry.discover(ROOT):
+        raise ValueError("未找到书写字库，请安装字体数据集或检查字体目录配置后重试")
     page = page_config(doc)
     cfg = build_configs({"handwriting": False, "seed": 0})
+    return_position = (0.0, 0.0)
+    if doc.pen_anchor:
+        # 预览用零点演算相对轨迹；真正入队前使用同一连接读取的工作坐标。
+        return_position = pen_position or (0.0, 0.0)
+        tf = gcode.PageToMachine(cfg["machine"], page)
+        ax, ay = tf(doc.pen_anchor.x_mm, doc.pen_anchor.y_mm)
+        cfg["machine"].offset_x += return_position[0] - ax
+        cfg["machine"].offset_y += return_position[1] - ay
     strokes, missing, diagnostics, layouts = [], [], [], []
     glyph_count = 0
     for element in doc.elements:
@@ -270,6 +284,28 @@ def prepare_canvas(doc: CanvasDocument) -> tuple[Prepared, bool]:
                 }
             )
         layouts.append({"element_id": element.id, "regions": region_layouts})
+    if doc.pen_anchor and pen_position is not None and cfg["machine"].fixed_grid_origin:
+        # 对位模式校验实际内容的盘面范围，而不是沿用整张纸的旧偏移。
+        tf = gcode.PageToMachine(cfg["machine"], page)
+        limits = CONFIG["page"]
+        for stroke in strokes:
+            for point in stroke.points:
+                mx, my = tf(*point)
+                x = -mx if cfg["machine"].invert_x else mx
+                y = -my if cfg["machine"].invert_y else my
+                if cfg["machine"].swap_xy:
+                    x, y = y, x
+                if not (
+                    limits.get("paper_min_x_mm", -100) - 1e-5
+                    <= x
+                    <= limits.get("grid_width_mm", 190) + 1e-5
+                    and limits.get("paper_min_y_mm", -50) - 1e-5
+                    <= y
+                    <= limits.get("grid_height_mm", 280) + 1e-5
+                ):
+                    raise ValueError(
+                        "笔头定位后的内容超出写字盘范围，请调整定位点或实际笔头位置"
+                    )
     svg = strokes_to_svg(strokes, page, color="#252a2a", bg="#f8f7f2")
     guide = f'<rect x="{doc.margin_mm}" y="{doc.margin_mm}" width="{page.usable_w}" height="{page.usable_h}" fill="none" stroke="#252a2a" stroke-opacity="0.16" stroke-width="0.5" stroke-dasharray="1.5 2"/>'
     svg = svg.replace("</svg>", guide + "</svg>")
@@ -277,7 +313,9 @@ def prepare_canvas(doc: CanvasDocument) -> tuple[Prepared, bool]:
     result = Prepared(
         submission_id=0,
         poem=Poem(body=doc.body, direction="horizontal"),
-        gcode=gcode.strokes_to_gcode(strokes, page, cfg["machine"]),
+        gcode=gcode.strokes_to_gcode(
+            strokes, page, cfg["machine"], return_position=return_position
+        ),
         svg=svg,
         strokes=len(strokes),
         cells=glyph_count,
