@@ -83,6 +83,7 @@ export interface WritingDocument {
   paper: "A4" | "A5";
   margin_mm: number;
   elements: PaperElement[];
+  pen_anchor?: { x_mm: number; y_mm: number } | null;
 }
 export interface Diagnostic {
   element_id: string;
@@ -132,13 +133,18 @@ function placement(d: WritingDocument, w: number, h: number) {
     ) || { x: m, y: m }
   );
 }
-export function newText(d: WritingDocument, text = ""): TextBox {
+export function newText(
+  d: WritingDocument,
+  text = "",
+  fontSize = defaultStyle.font_size_mm,
+): TextBox {
   const [w, h] = pageSize(d),
     m = d.margin_mm;
   const boxWidth = Math.min(100, w - 2 * m);
   const position = placement(d, boxWidth, Math.min(60, h - 2 * m));
   return {
     ...defaultStyle,
+    font_size_mm: fontSize,
     id: crypto.randomUUID(),
     type: "text",
     text,
@@ -160,7 +166,10 @@ export function newCell(row: number, col: number): Cell {
     valign: "center",
   };
 }
-export function newTable(d: WritingDocument): Table {
+export function newTable(
+  d: WritingDocument,
+  fontSize = defaultStyle.font_size_mm,
+): Table {
   const [w, h] = pageSize(d),
     m = d.margin_mm;
   const width = Math.min(120, w - 2 * m),
@@ -168,6 +177,7 @@ export function newTable(d: WritingDocument): Table {
   const position = placement(d, width, height);
   return {
     ...defaultStyle,
+    font_size_mm: fontSize,
     id: crypto.randomUUID(),
     type: "table",
     x_mm: position.x,
@@ -379,6 +389,13 @@ export function readDocument(raw: unknown): WritingDocument {
   )
     throw new Error("文档字段不正确");
   const ids = new Set<string>();
+  if (
+    d.pen_anchor != null &&
+    (typeof d.pen_anchor !== "object" ||
+      !finite(d.pen_anchor.x_mm, 0, pageSize(d)[0]) ||
+      !finite(d.pen_anchor.y_mm, 0, pageSize(d)[1]))
+  )
+    throw new Error("笔头定位点必须位于纸面内");
   let count = 0;
   let vectorSize = 0;
   for (const e of d.elements) {

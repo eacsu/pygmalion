@@ -1,5 +1,13 @@
-import { useEffect, useState } from "react";
-import { api, useResource, type Job, type Jobs, type Ports } from "./api";
+import { useEffect, useRef, useState } from "react";
+import {
+  api,
+  useJobs,
+  usePorts,
+  detectAndSelect,
+  type Job,
+  type Mode,
+  type PublicOperation,
+} from "./api";
 import { Button, Dialog, Link, WorkspaceIcon } from "./ui";
 import { navigation } from "./navigation";
 import { MachinePage, SettingsPage } from "./machine";
@@ -22,20 +30,91 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; error?: boolean }>();
   const [cancel, setCancel] = useState<Job>();
   const [estopping, setEstopping] = useState(false);
-  const jobs = useResource<Jobs>("/api/admin/jobs", 500);
-  const ports = useResource<Ports>("/api/admin/serial-ports", 5000);
+  const jobs = useJobs(500);
+  const ports = usePorts(5000);
   const current =
     jobs.data?.current || jobs.data?.jobs.find((j) => j.status === "queued");
   const busy = !!current;
   const active = navigation.find((item) => item.href === path)?.key || "layout";
+  const [detecting, setDetecting] = useState(false);
+  const attemptedPorts = useRef("");
+  const detectedPort = useRef("");
+  const portKey = ports.data
+    ? JSON.stringify(ports.data.ports.map((port) => port.device).sort())
+    : "";
+  const configuredPort = ports.data?.configured_port;
+  const reloadPorts = ports.reload;
+  useEffect(() => {
+    if (active !== "layout" || busy || !portKey || !configuredPort) return;
+    let cancelled = false;
+    let finished = false;
+    // 延迟到 effect 安装完成，避免 StrictMode 的重挂载触发两次串口探测。
+    const timer = window.setTimeout(() => {
+      setDetecting(false);
+      // 手动指定的机器保留；自动检测成功的端口仍跟踪拔插。
+      if (
+        configuredPort !== "auto" &&
+        configuredPort !== detectedPort.current
+      ) {
+        setDeviceState(`已选择 ${configuredPort}`);
+        finished = true;
+        return;
+      }
+      if (attemptedPorts.current === portKey) {
+        finished = true;
+        return;
+      }
+      attemptedPorts.current = portKey;
+      if (portKey === "[]") {
+        setDeviceState("未检测到书写机");
+        finished = true;
+        return;
+      }
+      setDetecting(true);
+      setDeviceState("正在检测书写机…");
+      void detectAndSelect()
+        .then((result) => {
+          if (cancelled) return;
+          detectedPort.current = result.port;
+          setDeviceState(`设备就绪 · ${result.port}`);
+          reloadPorts();
+        })
+        .catch((error) => {
+          if (!cancelled)
+            setDeviceState(
+              error instanceof Error ? error.message : "未检测到书写机",
+            );
+        })
+        .finally(() => {
+          finished = true;
+          if (!cancelled) setDetecting(false);
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (!finished) attemptedPorts.current = "";
+    };
+  }, [active, busy, portKey, configuredPort, reloadPorts]);
   const pageLabel = navigation.find((item) => item.key === active)!.label;
   const notify = (text: string, error = false) => setToast({ text, error });
+  const [mode, setMode] = useState<Mode>("execute");
+  const effectiveMode: Mode = jobs.data?.dry_run ? "simulate" : mode;
   const doc = useWorkbench({
     busy,
+    mode: effectiveMode,
     jobs: jobs.data?.jobs,
     notify,
     refresh: jobs.reload,
   });
+  const previousContext = useRef("");
+  useEffect(() => {
+    if (!configuredPort) return;
+    const next = `${active}:${configuredPort}`;
+    if (previousContext.current && previousContext.current !== next)
+      doc.reload();
+    previousContext.current = next;
+  }, [active, configuredPort, doc]);
   const last = jobs.data?.jobs.find((j) => j.job_id === doc.jobId);
   const record = current
     ? jobs.data?.jobs.find((j) => j.job_id === current.job_id)
@@ -66,8 +145,14 @@ export default function App() {
   async function estop() {
     setEstopping(true);
     try {
-      const result = await api<{ state: string }>("/api/admin/estop", {});
-      notify(`急停：${result.state}`);
+      const result = await api<PublicOperation>(
+        "/api/v1/machine/emergency-stop",
+        {},
+      );
+      notify(
+        result.error?.message || "急停状态尚未确认",
+        !result.result?.stop_confirmed,
+      );
       jobs.reload();
     } catch (error) {
       notify(error instanceof Error ? error.message : "急停失败", true);
@@ -157,16 +242,39 @@ export default function App() {
                   主题
                 </Button>
                 {active === "layout" && (
-                  <Button
-                    className="start-writing"
-                    kind="primary"
-                    disabled={
-                      !doc.canWrite || busy || !!jobs.error || jobs.loading
-                    }
-                    onClick={() => void doc.write()}
-                  >
-                    {doc.writing ? "正在准备" : busy ? "书写中" : "开始书写"}
-                  </Button>
+                  <>
+                    <select
+                      aria-label="书写模式"
+                      value={effectiveMode}
+                      disabled={busy || jobs.data?.dry_run}
+                      onChange={(event) => setMode(event.target.value as Mode)}
+                    >
+                      <option value="execute">真实书写</option>
+                      <option value="simulate">模拟书写</option>
+                    </select>
+                    <Button
+                      className="start-writing"
+                      kind="primary"
+                      disabled={
+                        doc.pendingSubmission
+                          ? doc.writing
+                          : !doc.canWrite ||
+                            busy ||
+                            detecting ||
+                            !!jobs.error ||
+                            jobs.loading
+                      }
+                      onClick={() => void doc.write()}
+                    >
+                      {doc.writing
+                        ? "正在准备"
+                        : doc.pendingSubmission
+                          ? "找回上次任务"
+                          : busy
+                            ? "书写中"
+                            : "开始书写"}
+                    </Button>
+                  </>
                 )}
                 {active !== "layout" && <span className="start-reserved" />}
                 <Button
@@ -260,7 +368,7 @@ export default function App() {
           confirmLabel="确认中止"
           close={() => setCancel(undefined)}
           confirm={async () => {
-            await api(`/api/admin/cancel/${cancel.job_id}`, {});
+            await api(`/api/v1/jobs/${cancel.job_id}/cancel`, {});
             notify("已请求中止；缓冲区中的动作可能仍会执行");
             jobs.reload();
           }}

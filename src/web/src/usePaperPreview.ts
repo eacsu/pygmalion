@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Preview } from "./api";
+import { api, type PublicPlan, type Preview } from "./api";
 import { readDocument, type WritingDocument } from "./canvas";
 
 type PaperPreview = Preview & { overflow: boolean };
@@ -13,6 +13,7 @@ function layoutKey(document: WritingDocument) {
   return JSON.stringify({
     ...document,
     name: undefined,
+    pen_anchor: undefined,
     elements: document.elements.map((element) =>
       element.type === "text"
         ? { ...element, text: undefined }
@@ -76,11 +77,38 @@ export function usePaperPreview(
     }
     async function load() {
       try {
-        const data = await api<PaperPreview>(
-          "/api/workbench/preview",
+        const plan = await api<PublicPlan>(
+          "/api/v1/plans",
           readDocument(JSON.parse(payload)),
           controller.signal,
         );
+        const response = await fetch(plan.preview_url, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("笔画预览读取失败");
+        const svg = await response.text();
+        const data: PaperPreview = {
+          plan_id: plan.id,
+          svg,
+          can_print: plan.status === "ready",
+          overflow: plan.diagnostics.some((item) =>
+            ["bounds", "overflow"].includes(item.code),
+          ),
+          missing: [],
+          warnings: [],
+          font: "",
+          font_size_mm: 8,
+          requested_size: 8,
+          shrunk: false,
+          strokes: plan.strokes,
+          cells: plan.cells,
+          diagnostics: plan.diagnostics.map((item) => ({
+            ...item,
+            element_id: item.element_id || "",
+            row: item.row ?? undefined,
+            col: item.col ?? undefined,
+          })),
+        };
         if (controller.signal.aborted) return;
         const url = URL.createObjectURL(
           new Blob([data.svg], { type: "image/svg+xml" }),

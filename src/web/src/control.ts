@@ -1,3 +1,14 @@
+import {
+  api,
+  ApiError,
+  request,
+  idempotent,
+  deviceOperation,
+  machineView,
+  type PublicSession,
+  type PublicMachine,
+} from "./api";
+
 export class ControlError extends Error {
   constructor(
     message: string,
@@ -7,126 +18,160 @@ export class ControlError extends Error {
   }
 }
 
-type Message = {
-  type: string;
-  id?: number;
-  ok?: boolean;
-  error?: string;
-  cancelled?: boolean;
-  state?: Record<string, string>;
-};
-
+/** 观察通道不持有设备；只有显式动作才取得有期限的控制会话。 */
 export class MachineControl {
+  private session: PublicSession | null = null;
+  private connecting: Promise<PublicSession> | null = null;
   private socket: WebSocket | null = null;
-  private ready: Promise<void> | null = null;
-  private sequence = 0;
-  private pending = new Map<
-    number,
-    {
-      resolve: (result: unknown) => void;
-      reject: (error: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
-    }
-  >();
-
+  private heartbeat: ReturnType<typeof setInterval> | undefined;
+  private generation = 0;
+  private reconnect: ReturnType<typeof setTimeout> | undefined;
   constructor(
     private onState: (state: Record<string, string>) => void,
     private onError: (message: string) => void,
     private onDisconnect: () => void,
   ) {}
-
-  private connect(): Promise<void> {
-    if (this.ready) return this.ready;
-    const url = new URL("/api/admin/machine/ws", window.location.href);
+  private async connect() {
+    if (this.session) return this.session;
+    if (this.connecting) return this.connecting;
+    const generation = this.generation;
+    this.connecting = idempotent<PublicSession>(
+      "/api/v1/machine/control-sessions",
+      {},
+      crypto.randomUUID(),
+    )
+      .then((session) => {
+        if (generation !== this.generation) {
+          void request(
+            `/api/v1/machine/control-sessions/${session.id}`,
+            "DELETE",
+          ).catch(() => {});
+          throw new ControlError("连接已取消", true);
+        }
+        this.session = session;
+        this.heartbeat = setInterval(() => {
+          void api<PublicSession>(
+            `/api/v1/machine/control-sessions/${session.id}/renew`,
+            {},
+          ).catch((error) => {
+            this.onError(error.message);
+            this.close();
+          });
+        }, 10000);
+        this.observe(generation);
+        return session;
+      })
+      .finally(() => {
+        this.connecting = null;
+      });
+    return this.connecting;
+  }
+  private observe(generation: number) {
+    if (generation !== this.generation || !this.session) return;
+    const url = new URL("/api/v1/events", window.location.href);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(url);
     this.socket = socket;
-    this.ready = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error("实时控制连接超时"));
-        this.close();
-      }, 5000);
-      socket.onmessage = (event) => {
-        if (this.socket !== socket) return;
-        const result = JSON.parse(event.data) as Message;
-        if (result.type === "connected") {
-          clearTimeout(timer);
-          resolve();
-        } else if (result.type === "state" && result.state) {
-          this.onState(result.state);
-        } else if (result.type === "result" && result.id !== undefined) {
-          const request = this.pending.get(result.id);
-          if (!request) return;
-          clearTimeout(request.timer);
-          this.pending.delete(result.id);
-          if (result.ok) request.resolve(result);
-          else
-            request.reject(
-              new ControlError(
-                result.error || "设备操作失败",
-                result.cancelled,
-              ),
-            );
-        } else if (result.type === "error") {
-          const message = result.error || "实时控制连接出错";
-          clearTimeout(timer);
-          reject(new Error(message));
-          this.onError(message);
+    socket.onmessage = (event) => {
+      if (generation !== this.generation) return;
+      try {
+        const message = JSON.parse(event.data) as {
+          type: string;
+          data: PublicMachine;
+        };
+        if (message.type === "machine.updated") {
+          if (message.data.connected) this.onState(message.data.state || {});
+          else if (message.data.sampled_at)
+            this.onError("设备连接已中断，请重新读取状态");
         }
-      };
-      socket.onerror = () => {
-        clearTimeout(timer);
-        reject(new Error("无法建立实时控制连接"));
-      };
-      socket.onclose = () => {
-        clearTimeout(timer);
-        if (this.socket !== socket) return;
-        reject(new Error("实时控制连接已断开"));
-        this.close();
-      };
-    });
-    return this.ready;
+      } catch {
+        this.onError("设备状态消息无法读取");
+      }
+    };
+    socket.onclose = () => {
+      if (generation !== this.generation) return;
+      this.reconnect = setTimeout(() => {
+        void api<PublicMachine>("/api/v1/machine")
+          .then((snapshot) => {
+            if (generation === this.generation && snapshot.connected)
+              this.onState(snapshot.state || {});
+          })
+          .catch(() => {});
+        this.observe(generation);
+      }, 1000);
+    };
   }
-
   async request<T>(type: string, payload?: object): Promise<T> {
-    await this.connect();
-    const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN)
-      throw new Error("实时控制连接已断开，请重新读取设备状态");
-    const id = ++this.sequence;
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        // 超时后关闭连接，不重发可能已执行的动作。
-        this.close();
-      }, 75000);
-      this.pending.set(id, {
-        resolve: (result) => resolve(result as T),
-        reject,
-        timer,
-      });
-      socket.send(JSON.stringify({ id, type, payload }));
-    });
+    if (type === "disconnect") {
+      await this.disconnect();
+      return {} as T;
+    }
+    const session = await this.connect();
+    const body = payload as { action?: string; dist?: number } | undefined;
+    let path = "/api/v1/machine/commands";
+    let data: object;
+    if (type === "inspect") {
+      path = "/api/v1/machine/refresh";
+      data = { session_id: session.id };
+    } else if (type === "backup") {
+      path = "/api/v1/machine/backups";
+      data = { session_id: session.id };
+    } else if (type === "jog") {
+      const action = body?.action;
+      data =
+        action === "x" || action === "y"
+          ? {
+              type: "jog",
+              axis: action,
+              distance_mm: body?.dist,
+              session_id: session.id,
+            }
+          : {
+              type:
+                action === "zero"
+                  ? "set_origin"
+                  : action === "goto_zero"
+                    ? "goto_origin"
+                    : action,
+              session_id: session.id,
+            };
+    } else data = { type, session_id: session.id };
+    let result;
+    try {
+      result = await deviceOperation(path, data);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "cancelled")
+        throw new ControlError(error.message, true);
+      throw error;
+    }
+    if (result.machine) this.onState(result.machine.state || {});
+    return {
+      ...(result.machine ? machineView(result.machine) : {}),
+      backup: result.backup?.id,
+      path: result.backup?.id,
+    } as T;
   }
-
   async disconnect() {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      this.close();
-      return;
-    }
-    await this.request("disconnect");
-    this.close();
+    const session = this.session;
+    this.close(false, false);
+    if (session)
+      await request(`/api/v1/machine/control-sessions/${session.id}`, "DELETE");
   }
-
-  close(notify = true) {
-    const socket = this.socket;
+  close(notify = true, release = true) {
+    this.generation++;
+    const session = this.session;
+    this.session = null;
+    if (this.reconnect) clearTimeout(this.reconnect);
+    this.reconnect = undefined;
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
+    this.socket?.close();
     this.socket = null;
-    this.ready = null;
-    for (const request of this.pending.values()) {
-      clearTimeout(request.timer);
-      request.reject(new Error("实时控制连接已断开；未确认动作不会自动重发"));
-    }
-    this.pending.clear();
-    socket?.close();
+    if (session && release)
+      void request(
+        `/api/v1/machine/control-sessions/${session.id}`,
+        "DELETE",
+      ).catch(() => {});
     if (notify) this.onDisconnect();
   }
 }

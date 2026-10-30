@@ -6,6 +6,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { PaperRulers } from "./PaperRulers";
+import { DefaultFontSize } from "./DefaultFontSize";
+import { PenAnchorMarker } from "./PenAnchorMarker";
 import { NumberField, NumberFieldsProvider } from "./NumberField";
 import { usePaperViewport } from "./usePaperViewport";
 import { useResource, type Fonts } from "./api";
@@ -118,6 +120,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
       const key = event.key.toLowerCase();
       if (key !== "z" && key !== "y") return;
       const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(".editor-defaults")) return;
       if (
         target?.closest('input,textarea,select,[contenteditable="true"]') &&
         !root.current?.contains(target) &&
@@ -135,6 +138,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
   }, [m]);
   const d = m.document;
   const [selected, setSelected] = useState<string>();
+  const [penSelected, setPenSelected] = useState(false);
   const [allSelected, setAllSelected] = useState<string[]>([]);
   const selectedCount = d.elements.filter((e) =>
     allSelected.includes(e.id),
@@ -223,7 +227,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
   >(undefined);
   const file = useRef<HTMLInputElement>(null);
   const svgFile = useRef<HTMLInputElement>(null);
-  const fonts = useResource<Fonts>("/api/fonts");
+  const fonts = useResource<Fonts>("/api/v1/fonts");
   const [width, height] = pageSize(d);
   const viewport = usePaperViewport(width, height);
   const { stage, paper, zoom, setZoom, scale } = viewport;
@@ -235,7 +239,12 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
     ) || [];
   const activeCell = chosenCells[0];
   const errors = m.preview?.diagnostics || [];
+  const noFonts =
+    !!fonts.data && !fonts.data.fonts.some((font) => font.available);
+  const fontError =
+    noFonts && d.elements.some((element) => element.type !== "vector");
   function select(id?: string) {
+    setPenSelected(false);
     m.endEdit();
     m.setComposing(false);
     setSelected(id);
@@ -245,6 +254,11 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
     setExtendSelection(false);
     setCellSelection([]);
     setEditing(undefined);
+  }
+  function selectPen() {
+    select();
+    setPenSelected(true);
+    if (window.matchMedia("(min-width: 651px)").matches) setInspectorOpen(true);
   }
   function safe(action: () => void) {
     try {
@@ -437,24 +451,28 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
     sizes[other] = total - value;
     m.replaceElement({ ...table, [key]: sizes });
   }
-  const feedback = m.error
-    ? "预览失败：" + m.error + (m.previewUrl ? "；当前显示上次成功预览" : "")
-    : !d.elements.length
-      ? "添加文本框、表格或导入 SVG，开始编排纸面"
-      : !m.preview
-        ? m.previewUrl
-          ? "正在更新笔画预览…"
-          : "正在生成笔画预览…"
-        : errors.length
-          ? errors
-              .map((v) => v.message)
-              .filter((v, i, a) => a.indexOf(v) === i)
-              .join("；")
-          : !m.preview.can_print
-            ? "没有可绘制的内容"
-            : busy
-              ? "当前纸面与机器参数已冻结"
-              : "✓ 内容位于可书写区域内";
+  const feedback = fontError
+    ? "未找到书写字库，无法生成笔画或开始书写。请安装字体数据集或检查字体目录配置后刷新。"
+    : m.error
+      ? "预览失败：" + m.error + (m.previewUrl ? "；当前显示上次成功预览" : "")
+      : !d.elements.length
+        ? "添加文本框、表格或导入 SVG，开始编排纸面"
+        : !m.preview
+          ? m.previewUrl
+            ? "正在更新笔画预览…"
+            : "正在生成笔画预览…"
+          : errors.length
+            ? errors
+                .map((v) => v.message)
+                .filter((v, i, a) => a.indexOf(v) === i)
+                .join("；")
+            : !m.preview.can_print
+              ? "没有可绘制的内容"
+              : busy
+                ? "当前纸面与机器参数已冻结"
+                : d.pen_anchor
+                  ? "✓ 内容位于纸面内 · 将按开始书写时的实际笔头位置定位"
+                  : "✓ 内容位于可书写区域内";
   return (
     <div
       ref={root}
@@ -463,6 +481,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         const target = event.target;
         if (
           target instanceof HTMLInputElement &&
+          !target.closest(".editor-defaults") &&
           (target.type === "text" || target.type === "number")
         )
           m.beginEdit(target.getAttribute("aria-label") || target.name);
@@ -471,6 +490,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         const target = event.target;
         if (
           target instanceof HTMLInputElement &&
+          !target.closest(".editor-defaults") &&
           (target.type === "text" || target.type === "number")
         )
           m.endEdit(target.getAttribute("aria-label") || target.name);
@@ -533,9 +553,14 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         )}
       <div className="canvas-tools" role="toolbar" aria-label="纸面工具">
         <Button
-          disabled={m.locked || d.elements.length >= 100}
+          disabled={
+            m.locked ||
+            !m.defaults.data ||
+            m.defaults.saving ||
+            d.elements.length >= 100
+          }
           onClick={() => {
-            const e = newText(d);
+            const e = newText(d, "", m.defaults.data!.font_size_mm);
             m.change("elements", [...d.elements, e]);
             select(e.id);
             setEditing({ id: e.id });
@@ -544,9 +569,14 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           添加文本框
         </Button>
         <Button
-          disabled={m.locked || d.elements.length >= 100}
+          disabled={
+            m.locked ||
+            !m.defaults.data ||
+            m.defaults.saving ||
+            d.elements.length >= 100
+          }
           onClick={() => {
-            const e = newTable(d);
+            const e = newTable(d, m.defaults.data!.font_size_mm);
             m.change("elements", [...d.elements, e]);
             select(e.id);
           }}
@@ -582,6 +612,19 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           onClick={() => viewport.setHand(false)}
         >
           选择
+        </Button>
+        <Button
+          kind="ghost"
+          aria-pressed={!!d.pen_anchor}
+          disabled={m.locked}
+          onClick={() => {
+            viewport.setHand(false);
+            if (!d.pen_anchor)
+              m.change("pen_anchor", { x_mm: d.margin_mm, y_mm: d.margin_mm });
+            selectPen();
+          }}
+        >
+          笔头定位
         </Button>
         <Button
           kind="ghost"
@@ -708,6 +751,18 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                     style={{
                       inset: `${(100 * d.margin_mm) / height}% ${(100 * d.margin_mm) / width}%`,
                     }}
+                  />
+                )}
+                {d.pen_anchor && (
+                  <PenAnchorMarker
+                    anchor={d.pen_anchor}
+                    width={width}
+                    height={height}
+                    scale={scale}
+                    selected={penSelected}
+                    locked={m.locked}
+                    select={selectPen}
+                    change={(point) => m.change("pen_anchor", point)}
                   />
                 )}
                 {d.elements.map((original) => {
@@ -991,9 +1046,9 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           <div
             className={
               "inline-preview-status " +
-              (m.error || errors.length ? "invalid" : "")
+              (fontError || m.error || errors.length ? "invalid" : "")
             }
-            role={m.error || errors.length ? "alert" : "status"}
+            role={fontError || m.error || errors.length ? "alert" : "status"}
           >
             <p>{feedback}</p>
             <div className="paper-coordinate-readout" aria-label="纸面坐标">
@@ -1023,11 +1078,13 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           <div className="inspector-content">
             <div className="inspector-identity">
               <h2>
-                {selectedCount
-                  ? `已选 ${selectedCount} 个元素`
-                  : element
-                    ? elementName(element)
-                    : "纸面设置"}
+                {penSelected && d.pen_anchor
+                  ? "笔头定位"
+                  : selectedCount
+                    ? `已选 ${selectedCount} 个元素`
+                    : element
+                      ? elementName(element)
+                      : "纸面设置"}
               </h2>
               {selectedCount > 0 && (
                 <p className="muted" role="status">
@@ -1067,6 +1124,51 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                 />
               </fieldset>
             </details>
+            <DefaultFontSize
+              defaults={m.defaults}
+              expanded={!element && !penSelected}
+            />
+            {penSelected && d.pen_anchor && (
+              <fieldset key={`pen:${m.inputEpoch}`} disabled={m.locked}>
+                <div className="property-heading">
+                  <h3>笔头对应点</h3>
+                  <span>纸面坐标</span>
+                </div>
+                <p className="muted">
+                  实际笔头保持不动。将标志放到内容中与笔头对应的位置，整份内容按此对位。
+                </p>
+                <div className="dimension-grid">
+                  <NumberField
+                    label="笔头 X"
+                    value={d.pen_anchor.x_mm}
+                    max={width}
+                    change={(value) =>
+                      m.change("pen_anchor", { ...d.pen_anchor!, x_mm: value })
+                    }
+                  />
+                  <NumberField
+                    label="笔头 Y"
+                    value={d.pen_anchor.y_mm}
+                    max={height}
+                    change={(value) =>
+                      m.change("pen_anchor", { ...d.pen_anchor!, y_mm: value })
+                    }
+                  />
+                </div>
+                <p className="muted">
+                  拖动或输入坐标只修改定位。点击“开始书写”时读取实际笔头位置；抬笔收尾后回到该位置。
+                </p>
+                <Button
+                  kind="ghost"
+                  onClick={() => {
+                    m.change("pen_anchor", null);
+                    select();
+                  }}
+                >
+                  取消笔头定位
+                </Button>
+              </fieldset>
+            )}
             {element ? (
               <>
                 <fieldset
@@ -1230,7 +1332,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                     <>
                       <div className="property-heading">
                         <h3>文字</h3>
-                        <span>整{table ? "表" : "框"}</span>
+                        <span>{table ? "当前表格" : "当前文本框"}</span>
                       </div>
                       <label className="compact-field font-field">
                         <span className="sr-only">字体</span>
@@ -1239,7 +1341,9 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                           value={element.font}
                           onChange={(e) => patch({ font: e.target.value })}
                         >
-                          <option value="">数据集默认字体</option>
+                          <option value="">
+                            {noFonts ? "未找到书写字库" : "数据集默认字体"}
+                          </option>
                           {fonts.data?.fonts.map((f) => (
                             <option
                               key={f.id}
@@ -1259,6 +1363,14 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                           </small>
                         )}
                       </label>
+                      {noFonts && (
+                        <p role="alert">
+                          未找到书写字库，无法生成笔画或开始书写。请安装字体数据集或检查字体目录配置。
+                          <Button kind="ghost" onClick={fonts.reload}>
+                            刷新字体列表
+                          </Button>
+                        </p>
+                      )}
                       <div className="dimension-grid font-fields">
                         {(
                           [
@@ -1539,7 +1651,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                   </div>
                 </fieldset>
               </>
-            ) : (
+            ) : penSelected && d.pen_anchor ? null : (
               <p className="muted inspector-empty">
                 选择纸面上的文本框、表格或矢量图，调整位置和尺寸。
               </p>

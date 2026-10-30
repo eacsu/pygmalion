@@ -991,6 +991,7 @@ select option {
   position: relative;
 }
 .canvas-paper {
+  color-scheme: light;
   margin: 0 auto;
   overflow: visible;
   box-sizing: content-box;
@@ -1012,6 +1013,39 @@ select option {
 .paper-element.selected {
   outline: 1px solid var(--paper-ink);
   z-index: 2;
+}
+.pen-anchor-marker {
+  position: absolute;
+  z-index: 8;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--paper-ink);
+  border-radius: 50%;
+  background: var(--paper-bg);
+  color: var(--paper-ink);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  touch-action: none;
+}
+.pen-anchor-marker.selected {
+  outline: 2px solid var(--editor-interaction);
+  outline-offset: 2px;
+}
+.pen-anchor-marker:active {
+  cursor: grabbing;
+}
+.pen-anchor-marker span {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  padding: 0 4px;
+  background: var(--paper-bg);
+  color: var(--paper-ink);
+  font-size: 11px;
+  white-space: nowrap;
 }
 .paper-element.element-invalid {
   outline: 1px solid var(--danger);

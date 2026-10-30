@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import {
   api,
-  useResource,
+  usePorts,
+  useCalibration,
+  useSoftwareConfig,
+  patchConfig,
+  detectAndSelect,
+  deviceOperation,
+  idempotent,
+  request,
+  type PublicSession,
   type Calibration,
   type Field,
   type Machine,
-  type Ports,
 } from "./api";
 import {
   Button,
@@ -28,7 +35,7 @@ export function MachinePage({
   notify: Notify;
   onState?: (state: string) => void;
 }) {
-  const ports = useResource<Ports>("/api/admin/serial-ports");
+  const ports = usePorts();
   const [port, setPort] = useState("");
   const [machine, setMachine] = useState<Machine>();
   const [machineError, setMachineError] = useState("");
@@ -102,7 +109,7 @@ export function MachinePage({
     }
     operating.current = true;
     setWorking(true);
-    if (path === "/api/admin/machine") setReading(true);
+    if (path === "inspect") setReading(true);
     try {
       type Result = {
         path?: string;
@@ -112,34 +119,36 @@ export function MachinePage({
         backup?: string;
       };
       const kinds: Record<string, string> = {
-        "/api/admin/machine": "inspect",
-        "/api/admin/jog": "jog",
-        "/api/admin/backup": "backup",
-        "/api/admin/recover": "recover",
-        "/api/admin/machine/disconnect": "disconnect",
+        inspect: "inspect",
+        jog: "jog",
+        backup: "backup",
+        recover: "recover",
+        disconnect: "disconnect",
       };
       let result: Result;
       if (kinds[path]) {
         result = await control.request<Result>(kinds[path], payload);
       } else {
         await control.disconnect();
-        result = await api<Result>(path, payload);
+        if (path === "detect") result = await detectAndSelect();
+        else {
+          const values = payload as { port: string };
+          await patchConfig("/api/v1/machine/connection", values);
+          result = { port: values.port };
+        }
       }
       if (!mounted.current) return;
-      if (path === "/api/admin/machine") {
+      if (path === "inspect") {
         setMachine(result as Machine);
         setMachineError("");
-      } else if (
-        path === "/api/admin/serial-port" ||
-        path === "/api/admin/serial-ports/detect"
-      ) {
+      } else if (path === "set_port" || path === "detect") {
         setMachine(undefined);
         setMachineError("");
         setPort(result.port || "");
         ports.reload();
       } else {
         updatePosition(result);
-        if (path === "/api/admin/recover") {
+        if (path === "recover") {
           setMachine(await control.request<Machine>("inspect"));
           setMachineError("");
         }
@@ -150,8 +159,7 @@ export function MachinePage({
     } catch (error) {
       if (!mounted.current) return;
       const message = error instanceof Error ? error.message : "设备操作失败";
-      if (path === "/api/admin/machine" || path === "/api/admin/jog")
-        setMachineError(message);
+      if (path === "inspect" || path === "jog") setMachineError(message);
       notify(message, true);
       if (propagate) throw error;
     } finally {
@@ -227,7 +235,7 @@ export function MachinePage({
             disabled={busy || working || jogCount > 0}
             onClick={() =>
               void action(
-                "/api/admin/serial-port",
+                "set_port",
                 { port: port || ports.data?.configured_port || "auto" },
                 "串口已保存",
               )
@@ -237,28 +245,20 @@ export function MachinePage({
           </Button>
           <Button
             disabled={busy || working || jogCount > 0}
-            onClick={() =>
-              void action("/api/admin/serial-ports/detect", {}, "设备已检测")
-            }
+            onClick={() => void action("detect", {}, "设备已检测")}
           >
             检测串口
           </Button>
           <Button
             disabled={busy || working || jogCount > 0}
-            onClick={() =>
-              void action("/api/admin/machine", undefined, "设备状态已读取")
-            }
+            onClick={() => void action("inspect", undefined, "设备状态已读取")}
           >
             读取设备状态
           </Button>
           <Button
             disabled={!machine || busy || working || jogCount > 0}
             onClick={() =>
-              void action(
-                "/api/admin/machine/disconnect",
-                undefined,
-                "设备连接已断开",
-              )
+              void action("disconnect", undefined, "设备连接已断开")
             }
           >
             断开连接
@@ -267,9 +267,7 @@ export function MachinePage({
         <ResourceState
           loading={reading}
           error={machineError}
-          retry={() =>
-            void action("/api/admin/machine", undefined, "设备状态已读取")
-          }
+          retry={() => void action("inspect", undefined, "设备状态已读取")}
         />
         <dl className="device-facts">
           <div>
@@ -400,7 +398,7 @@ export function MachinePage({
             <Button
               disabled={!available}
               onClick={() =>
-                void action("/api/admin/jog", { action: "pen_up" }, "抬笔完成")
+                void action("jog", { action: "pen_up" }, "抬笔完成")
               }
             >
               抬笔
@@ -408,11 +406,7 @@ export function MachinePage({
             <Button
               disabled={!available}
               onClick={() =>
-                void action(
-                  "/api/admin/jog",
-                  { action: "pen_down" },
-                  "落笔完成",
-                )
+                void action("jog", { action: "pen_down" }, "落笔完成")
               }
             >
               落笔
@@ -423,11 +417,7 @@ export function MachinePage({
             <Button
               disabled={!available}
               onClick={() =>
-                void action(
-                  "/api/admin/jog",
-                  { action: "goto_zero" },
-                  "已移回原点",
-                )
+                void action("jog", { action: "goto_zero" }, "已移回原点")
               }
             >
               移回原点
@@ -448,9 +438,7 @@ export function MachinePage({
           <div className="maintenance-actions">
             <Button
               disabled={!connected || busy || working || jogCount > 0}
-              onClick={() =>
-                void action("/api/admin/backup", undefined, "机器设置已备份")
-              }
+              onClick={() => void action("backup", undefined, "机器设置已备份")}
             >
               备份机器设置
             </Button>
@@ -460,7 +448,7 @@ export function MachinePage({
               disabled={
                 (!machine && !machineError) || busy || working || jogCount > 0
               }
-              onClick={() => void action("/api/admin/recover", {}, "恢复结果")}
+              onClick={() => void action("recover", {}, "恢复结果")}
             >
               解除卡死 / 恢复
             </Button>
@@ -478,7 +466,7 @@ export function MachinePage({
           close={() => setZero(false)}
           confirm={async () => {
             await action(
-              "/api/admin/jog",
+              "jog",
               { action: "zero" },
               "当前位置已设为工作原点",
               true,
@@ -493,7 +481,7 @@ export function MachinePage({
 }
 
 export function CalibrationPage({ notify }: { notify: Notify }) {
-  const resource = useResource<Calibration>("/api/admin/grid-calibration");
+  const resource = useCalibration();
   return (
     <>
       <Heading title="纸张校准">
@@ -508,6 +496,7 @@ export function CalibrationPage({ notify }: { notify: Notify }) {
         <CalibrationEditor
           key={JSON.stringify(resource.data)}
           calibration={resource.data}
+          etag={resource.etag!}
           reload={resource.reload}
           notify={notify}
         />
@@ -517,10 +506,12 @@ export function CalibrationPage({ notify }: { notify: Notify }) {
 }
 function CalibrationEditor({
   calibration,
+  etag,
   reload,
   notify,
 }: {
   calibration: Calibration;
+  etag: string;
   reload: () => void;
   notify: Notify;
 }) {
@@ -583,7 +574,16 @@ function CalibrationEditor({
   async function save() {
     setSaving(true);
     try {
-      await api("/api/admin/grid-calibration", { values: form });
+      const { paper_width_mm, paper_height_mm, ...rest } = form;
+      await patchConfig(
+        "/api/v1/settings/calibration",
+        {
+          ...rest,
+          width_mm: paper_width_mm,
+          height_mm: paper_height_mm,
+        },
+        etag,
+      );
       setDirty(false);
       notify("纸张位置已保存");
       reload();
@@ -779,7 +779,7 @@ export function SettingsPage({
   busy: boolean;
   notify: Notify;
 }) {
-  const config = useResource<{ fields: Field[] }>("/api/admin/config");
+  const config = useSoftwareConfig();
   return (
     <>
       <Heading title="参数设置">
@@ -794,6 +794,7 @@ export function SettingsPage({
         <SettingsEditor
           key={JSON.stringify(config.data)}
           fields={config.data.fields}
+          etag={config.data.etag}
           busy={busy}
           reload={config.reload}
           notify={notify}
@@ -804,11 +805,13 @@ export function SettingsPage({
 }
 function SettingsEditor({
   fields,
+  etag,
   busy,
   reload,
   notify,
 }: {
   fields: Field[];
+  etag: string;
   busy: boolean;
   reload: () => void;
   notify: Notify;
@@ -820,19 +823,15 @@ function SettingsEditor({
   const [parameter, setParameter] = useState("$110");
   const [target, setTarget] = useState("4000");
   const [preview, setPreview] = useState<{
+    id: string;
     commands: string[];
     changes: Record<string, string>;
   }>();
   async function save() {
     setSaving(true);
     try {
-      const result = await api<{ clamped: string[]; rejected: string[] }>(
-        "/api/admin/config",
-        { values },
-      );
-      notify(
-        `软件参数已保存${result.clamped.length ? `；已调整：${result.clamped.join("、")}` : ""}${result.rejected.length ? `；未保存：${result.rejected.join("、")}` : ""}`,
-      );
+      await patchConfig("/api/v1/settings/software", values, etag);
+      notify("软件参数已保存");
       reload();
     } catch (error) {
       notify(error instanceof Error ? error.message : "保存失败", true);
@@ -844,11 +843,15 @@ function SettingsEditor({
     setSaving(true);
     try {
       const changes = { [parameter]: target };
-      const result = await api<{ will_send: string[] }>("/api/admin/settings", {
-        changes,
-        confirm: false,
-      });
-      setPreview({ commands: result.will_send, changes });
+      const result = await api<{ id: string; commands: string[] }>(
+        "/api/v1/machine/settings/previews",
+        {
+          changes: Object.fromEntries(
+            Object.entries(changes).map(([key, value]) => [key, Number(value)]),
+          ),
+        },
+      );
+      setPreview({ id: result.id, commands: result.commands, changes });
     } catch (error) {
       notify(error instanceof Error ? error.message : "预览失败", true);
     } finally {
@@ -965,8 +968,11 @@ function SettingsEditor({
             onClick={async () => {
               setSaving(true);
               try {
-                const result = await api<{ path: string }>("/api/admin/backup");
-                notify(`机器设置已备份：${result.path}`);
+                const result = await deviceOperation(
+                  "/api/v1/machine/backups",
+                  {},
+                );
+                notify(`机器设置已备份：${result.backup?.id}`);
               } catch (error) {
                 notify(
                   error instanceof Error ? error.message : "备份失败",
@@ -995,11 +1001,23 @@ function SettingsEditor({
           danger
           close={() => setPreview(undefined)}
           confirm={async () => {
-            const result = await api<{ backup: string; result: string[] }>(
-              "/api/admin/settings",
-              { changes: preview.changes, confirm: true },
+            const session = await idempotent<PublicSession>(
+              "/api/v1/machine/control-sessions",
+              {},
+              crypto.randomUUID(),
             );
-            notify(`参数已写入；备份：${result.backup}`);
+            try {
+              const result = await deviceOperation(
+                `/api/v1/machine/settings/previews/${preview.id}/apply`,
+                { session_id: session.id },
+              );
+              notify(`参数已写入；备份：${result.backup?.id}`);
+            } finally {
+              await request(
+                `/api/v1/machine/control-sessions/${session.id}`,
+                "DELETE",
+              );
+            }
           }}
         >
           <p>将执行以下指令。写入前会创建完整机器备份；备份失败时终止写入。</p>

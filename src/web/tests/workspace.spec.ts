@@ -158,14 +158,17 @@ test("缺字、越界、内容溢出及预览失败阻止执行，支持重试",
   await expect(page.locator(".inline-preview-status")).toContainText(
     "超出纸面",
   );
-  await page.route("**/api/workbench/preview", (route) =>
-    route.fulfill({ status: 503, json: { error: "测试预览不可用" } }),
+  await page.route("**/api/v1/plans", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: { code: "test_failure", message: "测试预览不可用" } },
+    }),
   );
   await page.getByLabel("横向位置", { exact: true }).fill("20");
   await expect(page.locator(".inline-preview-status")).toContainText(
     "测试预览不可用",
   );
-  await page.unroute("**/api/workbench/preview");
+  await page.unroute("**/api/v1/plans");
   await page.getByRole("button", { name: "重新预览", exact: true }).click();
   await expect(page.locator(".inline-preview-status")).toContainText(
     "文本框内容溢出",
@@ -260,7 +263,7 @@ test("自适应旧响应不覆盖编辑，失败时保留原表格", async ({ pa
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/workbench/table-fit", async (route) => {
+  await page.route("**/api/v1/documents/fit-table", async (route) => {
     const response = await route.fetch();
     await gate;
     await route.fulfill({ response });
@@ -273,7 +276,7 @@ test("自适应旧响应不覆盖编辑，失败时保留原表格", async ({ pa
   release();
   await expect(page.getByText("文档已变化，请重新自适应")).toBeVisible();
   await expect(page.getByLabel("字号", { exact: true })).toHaveValue("7");
-  await page.unroute("**/api/workbench/table-fit");
+  await page.unroute("**/api/v1/documents/fit-table");
   await editCell(page, 1, 1, "甲".repeat(2000));
   const before = await exportDocument(page);
   await page.getByRole("button", { name: "自适应", exact: true }).click();

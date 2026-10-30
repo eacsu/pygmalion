@@ -7,6 +7,12 @@ const snapshot = async (page: import("@playwright/test").Page) =>
     JSON.parse(localStorage.getItem("pygmalion-document-v2")!),
   );
 async function upload(page: import("@playwright/test").Page, svg = source) {
+  await expect(page.getByLabel("书写模式", { exact: true })).toHaveValue(
+    "simulate",
+  );
+  await expect(
+    page.getByRole("button", { name: "导入 SVG", exact: true }),
+  ).toBeEnabled();
   await page.getByLabel("SVG 文件", { exact: true }).setInputFiles({
     name: "图案.svg",
     mimeType: "image/svg+xml",
@@ -109,7 +115,7 @@ test("导入返回前文档变化时丢弃结果", async ({ page }) => {
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/workbench/import-svg", async (route) => {
+  await page.route("**/api/v1/imports/svg", async (route) => {
     const response = await route.fetch();
     await held;
     await route.fulfill({ response });
@@ -139,7 +145,7 @@ test("非法矢量文档不会覆盖本机草稿", async ({ page }) => {
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(invalid)),
   });
-  await expect(page.getByText("请求失败（422）")).toBeVisible();
+  await expect(page.getByText("请求字段不正确")).toBeVisible();
   expect(await snapshot(page)).toEqual(before);
 });
 

@@ -30,8 +30,11 @@ async function inputAndRead(editor: Locator, value: string) {
 }
 
 test("逐字同步保存，预览失败和未失焦都不阻止刷新恢复", async ({ page }) => {
-  await page.route("**/api/workbench/preview", (route) =>
-    route.fulfill({ status: 503, json: { error: "预览暂不可用" } }),
+  await page.route("**/api/v1/plans", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: { code: "test_failure", message: "预览暂不可用" } },
+    }),
   );
   await page.goto("/");
   const editor = await addText(page);
