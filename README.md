@@ -27,7 +27,15 @@ poetry run python -m pygmalion.commands.app serve --dry-run
 
 演练只作用于书写任务。机器页的检测、点动、抬落笔、原点设置和恢复操作始终针对实际设备，界面按实际接口结果反馈。
 
-支持 `PYGMALION_HOST`、`PYGMALION_PORT`、`PYGMALION_DRY_RUN`、`PYGMALION_HOME`、`PYGMALION_FONTS_DIR`。运行数据根目录默认是仓库；使用 `--data-home` 指定另一目录时，默认从该目录下的 `model-bin/` 读取字体；也可用 `--fonts-dir` 或 `PYGMALION_FONTS_DIR` 独立指定字体数据集父目录，无需复制字库。字体只支持 Hugging Face Parquet 数据集，不再读取 JSON、CNC Draw 或内置几何/西文字库。`.env.example` 提供示例，VS Code 调试配置读取 `.env`。
+无前端独立启动（无需 Node 或 `dist`）：
+
+```bash
+poetry run app serve --api-only --dry-run --host 127.0.0.1
+```
+
+接口文档：`/docs`，契约：`/openapi.json`，完整调用及故障语义见 [公开接口 v1](docs/api-v1.md)。
+
+支持 `PYGMALION_API_ONLY`、`PYGMALION_HOST`、`PYGMALION_PORT`、`PYGMALION_DRY_RUN`、`PYGMALION_HOME`、`PYGMALION_FONTS_DIR`。运行数据根目录默认是仓库；使用 `--data-home` 指定另一目录时，默认从该目录下的 `model-bin/` 读取字体；也可用 `--fonts-dir` 或 `PYGMALION_FONTS_DIR` 独立指定字体数据集父目录，无需复制字库。字体只支持 Hugging Face Parquet 数据集，不再读取 JSON、CNC Draw 或内置几何/西文字库。`.env.example` 提供示例，VS Code 调试配置读取 `.env`。
 
 内置字库使用标准 Hugging Face 数据集目录 `model-bin/cjk-medians/`，包含 `train.parquet`、`README.md` 和 `ARPHICPL.TXT`。Parquet 使用 Zstd 压缩和四位小数的定点整数，约 1.61 MiB，无损保留全部字形与笔顺。该目录已被 Git 忽略，新检出或部署时须单独提供，缺失时应用会提示缺字。
 
@@ -53,10 +61,11 @@ glyphs = load_dataset("model-bin/cjk-medians", split="train")
 - “保存”按钮额外导出 `.pygmalion.json` 文件；本机缓存失败时仍可导出副本。打开接受该 JSON 或 UTF-8 `.txt`。新建或打开将替换当前浏览器草稿，尚未导出文件的修改会要求确认。
 - 输入文字时保留同一布局下上次成功的笔迹预览，新图加载完成后再替换，其他单元格不会随每次输入清空。等待期间提示正在更新；预览失败时保留旧图并提供重试，只有最新文档的预览校验通过后才能书写。新建、打开、清空或改变布局时不沿用旧图。
 - 预览和落笔共用元素排版、表格线及真实字库笔画。页边距辅助线仅在 SVG 显示，不进入 G-code。书写时冻结完整文档、纸张参数、轨迹和机器参数；后续设置不影响已开始的任务。
-- 只允许一个活动书写任务。进度明确为“指令发送进度”，100% 后仍等机器返回 Idle 才完成。中止停止后续发送；急停保留原有真实控制结果。程序重启不自动续写。
+- 只允许一个活动书写任务。进度明确为“指令发送进度”，100% 后仍等机器返回 Idle 才完成。中止停止后续发送并确认抬笔收尾，通信异常返回结果未知；急停分别报告指令发送和停稳确认状态。程序重启不自动续写。
 - 演练仅作用于书写任务；机器页的检测、点动、抬落笔和恢复仍为真实动作。浏览器与自动测试使用隔离运行目录及演练模式，不自动连接物理设备。
-- 机器页通过 WebSocket 复用控制连接、推送坐标；离开机器页释放串口，断线不重发运动。连接抽屉折叠后仍显示已读取的状态和端口。
-- 工作台使用 `/api/workbench/preview`、`/api/workbench/write` 与 `/api/workbench/table-fit`。旧数据库与任务执行器保留兼容：书写时内部创建关联记录，但不会将其标题或作者送入新排版器，也不会在 UI 暴露旧投稿系统。
+- 机器页通过 HTTP 控制会话与可查询操作执行动作，WebSocket 只观察状态；离开机器页释放会话，重连不重发运动。连接抽屉折叠后仍显示已读取的状态和端口。
+- 串口为自动模式时，工作台在空闲时检测书写机；唯一 GRBL 设备自动选用，可直接开始书写，无需进入机器控制页保存端口。多台设备时才需手动选择，已手动指定的机器不会被自动覆盖。端口列表变化时重新检测，书写期间不探测串口。
+- 工作台先创建冻结方案，再按方案 ID 提交任务；支持明确的真实/模拟模式。提交响应丢失时保存原去重键，刷新后可“找回上次任务”。原数据库历史保留，旧 HTTP 接口和命令 WebSocket 已移除。
 
 [Figma 白垣单页基线](https://www.figma.com/design/m1toyRcCag4OOsJNMebFDb?node-id=8-1071) · [苍渊基线](https://www.figma.com/design/m1toyRcCag4OOsJNMebFDb?node-id=8-3344)
 
@@ -72,24 +81,26 @@ glyphs = load_dataset("model-bin/cjk-medians", split="train")
 - 合并仅允许矩形区域，且最多一个单元格有文字；拆分后文字保留在左上格。删除含文字的行列前需要确认。单元格支持水平和垂直对齐。
 - “自适应”固定表格位置、总宽和总高。当前内容已放得下时保留原布局；否则先在当前字号下调整行高、列宽，仍放不下时才以 0.1 mm 为步长缩小字号，最低 4 mm，绝不放大。合并格按跨行跨列空间参与计算；4 mm 仍放不下时保留原布局并指出溢出单元格。仅点击时执行。
 - 属性数值可先清空再填写，支持小数；合法值输入后立即生效并自动保存。格式错误、越界值会显示字段提示，空值或未完成的小数在失焦/Enter 后提示。非法草稿不会覆盖已保存数值，并阻止保存文件、自适应和书写；Esc 恢复最近有效值。行高、列宽会为相邻行列保留至少 0.25 mm；切换对象、打开文档或撤销重做会重置未生效的草稿。
+- 工作台右侧“默认字号”配置应用级新建字号，范围为 4–40 mm，初始为 8 mm；点击“保存默认字号”后持久保存到本机应用配置，刷新或重启后仍生效。新建文本框、表格及导入 TXT 使用该值；已有元素与打开的 JSON 文档保留各自字号。选中文本框后，在“文字 · 当前文本框”的“字号”修改当前框，立即自动保存并更新真实笔画预览，支持撤销重做。修改默认字号不会改动已有文档，也不进入文档撤销历史；默认值输入或保存失败不影响已有元素的编辑。
 - 默认框线按最多 **5 mm** 一段绘制：每段完成后抬笔，从同一端点落笔续画，保持实线。参数设置中的“表格框线分段长度”可调整为 0.5–20 mm；只作用于表格线，任务冻结当时的设置。
 - 默认实际书写表格线和文字；关闭“实际书写表格线”后只填写文字，编辑辅助网格仍可见。共享边只画一次，合并格内部不画线；无文字的空表也可单独绘制表格线。
-- 文档保存为 `version: 2`，包含纸张设置和以毫米记录的 `elements`。旧 JSON、旧浏览器文档和 TXT 导入为一个文本框；旧竖排文档会转换为横排。旧投稿 API 保持兼容。
-- 预览返回元素/单元格的布局与诊断；文字溢出、缺字和元素越界由服务端再次校验。自适应结果只应用于请求时的文档版本，编辑过程中返回的旧结果不会覆盖新内容。
+- 文档保存为 `version: 2`，包含纸张设置和以毫米记录的 `elements`。旧 JSON、旧浏览器文档和 TXT 导入为一个文本框；旧竖排文档会转换为横排。旧投稿 API 已移除，历史数据保留。
+- 笔头定位：点击工具栏“笔头定位”，把笔尖标志拖到内容中的参考点，也可在属性里输入毫米坐标。实体笔头保持不动，开始真实书写时读取当前位置，整份内容据此定位，收尾回到该位置。标志可用方向键微调，Shift 为 10 mm、Alt 为 0.1 mm；保存、刷新与撤销重做均保留定位。
+- 方案返回元素/单元格的诊断；文字溢出、缺字和元素越界由服务端再次校验。自适应结果只应用于请求时的文档版本，编辑过程中返回的旧结果不会覆盖新内容。
 
 ## 工程结构
 
 ```text
 src/pygmalion/commands/app.py Typer 入口、环境变量、日志与 Uvicorn 启动
 src/pygmalion/api/app.py     FastAPI 工厂、生命周期与静态前端托管
-src/pygmalion/api/v1/        HTTP 路由、WebSocket 协议及消息队列
+src/pygmalion/api/v1/        公开 HTTP 路由与只读事件 WebSocket
 src/pygmalion/servicer/      业务服务、资源上下文与协议无关的服务错误
 src/pygmalion/schemas/       共享 Pydantic 文档、元素和请求模型
 src/pygmalion/fonts/         字库发现、Hugging Face 数据集与字形来源
 src/pygmalion/writing/       排版、手写效果、平滑路径、SVG 预览与离线生成
 src/pygmalion/machine/       设备控制器、串口会话与互斥、机器坐标、G-code 和 GRBL
-src/pygmalion/submissions/   投稿存取
-src/pygmalion/jobs/          任务记录、进度与单线程执行队列
+src/pygmalion/plans/         方案准备、上下文指纹与定位绑定
+src/pygmalion/execution/     方案、任务、操作及去重记录的持久化
 src/pygmalion/storage.py     SQLite 连接、建表与迁移
 src/pygmalion/config.py      应用配置与运行目录
 src/web/src/                React / TypeScript 页面、共享组件与语义样式
@@ -102,13 +113,15 @@ tests/                     业务、任务和机器协议边界检查
 
 `commands` 是统一启动入口：`poetry run app serve`（或 `poetry run python -m pygmalion.commands.app serve`）。Uvicorn 只在 `commands/app.py` 内启动，加载 `pygmalion.api.app:app`。后端调试也通过该命令入口读取 `.env`。
 
-`api`、`servicer`、`schemas` 同级。调用顺序为 `api.v1 → servicer → writing / fonts / jobs / machine / repository`：路由负责 HTTP 和 WebSocket 的输入输出，服务负责业务编排，设备控制器负责串口、锁、点动、备份与指令发送。任务冻结、后台线程和进度仍由 `jobs` 管理。HTTP 和 WebSocket 共用设备服务；WebSocket 不调用 HTTP 路由。共享模型只包含数据、校验和派生属性，纸张配置转换留在 `writing`。
+`api`、`servicer`、`schemas` 同级。调用顺序为 `api.v1 → servicer → plans / execution / writing / fonts / machine`：路由负责 HTTP 和 WebSocket 的输入输出，服务负责业务编排，设备控制器负责串口、锁、点动、备份与指令发送。任务冻结、后台线程、操作队列与设备所有权由 `servicer/execution.py` 统一管理。HTTP 和只读 WebSocket 使用相同的公共状态模型。共享模型只包含数据、校验和派生属性，纸张配置转换留在 `writing`。
 
-`v1` 仅是 Python 路由包版本，现有 `/api/...` 地址保持不变。原 Python `pygmalion.web` 已移除；浏览器前端仍位于 `src/web`。导入应用或调用工厂不会创建数据库、启动工作线程或打开串口；进入应用生命周期后，先检查前端构建，再初始化运行资源，退出或启动失败时统一清理。
+公开地址统一为 `/api/v1`，不再保留旧路由。原 Python `pygmalion.web` 已移除；浏览器前端仍位于 `src/web`。导入应用或调用工厂不会创建数据库、启动工作线程或打开串口；进入应用生命周期后，按启动模式检查前端构建，再初始化运行资源；同一数据库以进程锁禁止第二个执行器，退出或启动失败时统一清理。
 
-FastAPI 使用 [官方 frontend 托管方式](https://fastapi.tiangolo.com/tutorial/frontend/) 提供 `src/web/dist` 和 SPA 页面；未知 `/api` 请求返回 404，静态资源和 OpenAPI 不经过 SPA 回退。前端未构建时，启动会明确提示执行 `pnpm run build`。
+FastAPI 使用 [官方 frontend 托管方式](https://fastapi.tiangolo.com/tutorial/frontend/) 提供 `src/web/dist` 和 SPA 页面；未知 `/api` 请求返回 404，静态资源和 OpenAPI 不经过 SPA 回退。普通 Web 模式前端未构建时会明确提示执行 `pnpm run build`；`--api-only` 不加载前端。
 
 运行生成的 `config.json`、`data/poems.db`、`output/`、`backups/` 均已忽略。清华源保留为补充源；本次其部分下载返回 403，安装使用官方 PyPI，并提交 Poetry 与 pnpm 锁文件。
+
+本次功能重建范围、字库恢复和禁止真实串口的测试方式见 [恢复说明](docs/recovery.md)。
 
 ## 开发与验证
 
@@ -122,14 +135,17 @@ Vite `/api` 代理到 `127.0.0.1:8080`。VS Code 的 `backend` 调试先执行 `
 ```bash
 poetry run pytest -q
 poetry run ruff check src/pygmalion tests --select F
+pnpm --dir src/web run api:check
 pnpm --dir src/web run lint
 pnpm --dir src/web run build
 pnpm --dir src/web run test:e2e
 ```
 
-浏览器检查使用 Playwright Chromium（首次执行 `pnpm --dir src/web exec playwright install chromium`），Poetry 需在 PATH 中。测试服务使用 8097 端口、`.cache/e2e` 独立数据目录和任务演练模式，递归查找并复制本地数据集字库；不会调用真实运动接口。检查覆盖 390 / 1024 / 1440 / 1920px、双主题、纸面拖放缩放、逐字自动保存、整次编辑撤销重做、中文输入法与缓存失败恢复、慢响应下预览连续显示及过期图片保护、表格合并拆分、自适应及旧响应保护、文档迁移与保存打开、键盘焦点恢复、溢出与缺字、预览失败恢复、演练中止、软件参数保存和 WebSocket 控制边界。
+浏览器检查使用 Playwright Chromium（首次执行 `pnpm --dir src/web exec playwright install chromium`），Poetry 需在 PATH 中。测试服务使用 8097 端口、`.cache/e2e` 独立数据目录和任务演练模式，递归查找并复制本地数据集字库；不会调用真实运动接口。检查覆盖 390 / 1024 / 1440 / 1920px、双主题、纸面拖放缩放、逐字自动保存、整次编辑撤销重做、中文输入法与缓存失败恢复、慢响应下预览连续显示及过期图片保护、表格合并拆分、自适应及旧响应保护、文档迁移与保存打开、键盘焦点恢复、溢出与缺字、预览失败恢复、演练中止、软件参数保存、笔头定位、响应丢失找回任务和 HTTP 控制会话边界。
 
-验收命令见上方；测试覆盖通用正文与兼容接口，不连接实体机器。实体机器的行程、坐标、抬落笔与急停效果仍需连接设备后实机验证。
+验收命令见上方；测试覆盖公开契约、历史迁移与前端使用流程，不连接实体机器。实体机器的行程、坐标、抬落笔与急停效果仍需连接设备后实机验证。
+
+公共 Schema 修改后运行 `pnpm --dir src/web run api:types`，同时提交 `openapi.json` 与生成的 TypeScript 类型；`api:check` 检查契约漂移。只导出 OpenAPI 可运行 `poetry run app export-openapi --output src/web/openapi.json`，不初始化数据库或设备。独立 Python 客户端见 [examples/v1_write.py](examples/v1_write.py)。
 
 ## 设计交接与来源
 
