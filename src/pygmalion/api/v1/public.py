@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import uuid
 from typing import Annotated
 
 from fastapi import (
@@ -21,7 +20,6 @@ from ...schemas.canvas import (
     EditorDefaults,
     FitRequest,
     SvgImportRequest,
-    Vector,
 )
 from ...schemas.public import (
     Backup,
@@ -143,8 +141,7 @@ def fit(data: FitRequest):
 
 @router.post("/imports/svg", response_model=ImportResult)
 def import_svg(data: SvgImportRequest):
-    result = workbench.import_vector(data)
-    return {"element": Vector(id=uuid.uuid4().hex, **result)}
+    return {"element": workbench.import_vector(data)}
 
 
 @router.post("/plans", response_model=Plan, status_code=201)

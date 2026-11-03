@@ -1,6 +1,8 @@
 """文档变换，不创建任务或持有设备。"""
 
-from ..schemas.canvas import FitRequest, Table
+import uuid
+
+from ..schemas.canvas import FitRequest, SvgImportRequest, Table, Vector
 from ..writing.canvas import fit_table, prepare_canvas
 from .errors import ServiceError
 
@@ -31,11 +33,11 @@ def fit_document_table(data: FitRequest):
         raise ServiceError("invalid", {"error": str(exc)})
 
 
-def import_vector(data):
+def import_vector(data: SvgImportRequest) -> Vector:
     from ..drawing.svg import import_svg
 
     try:
         result = import_svg(data.source)
-        return {"name": data.name, **result}
+        return Vector(id=uuid.uuid4().hex, name=data.name, **result)
     except ValueError as exc:
         raise ServiceError("invalid", {"error": str(exc)})

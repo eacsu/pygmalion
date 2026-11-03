@@ -10,9 +10,10 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
-from ..schemas.canvas import CanvasDocument, FitRequest
-from ..schemas.public import CreateJob
+from ..schemas.canvas import CanvasDocument, FitRequest, SvgImportRequest
+from ..schemas.public import CreateJob, ImportResult
 from ..servicer import documents, workbench
+from ..servicer.errors import ServiceError
 from ..servicer.public_errors import PublicError
 
 Revision = Annotated[int, Field(ge=1)]
@@ -36,6 +37,8 @@ def checked(function, *args, **kwargs):
         raise ToolError(
             json.dumps(exc.problem.model_dump(mode="json"), ensure_ascii=False)
         ) from exc
+    except ServiceError as exc:
+        raise ToolError(f"{exc.kind}: {exc}") from exc
 
 
 def create_mcp(application):
@@ -46,6 +49,8 @@ def create_mcp(application):
             "保留现有元素 ID、未修改内容和笔头定位，所有排版坐标与尺寸使用毫米。"
             "save_document 必须传读取到的 revision；document_changed 时重新读取并合并，"
             "不得用新版本号强行覆盖他人内容。保存后网页会自动同步。"
+            "导入 SVG 文件时，将文件内容传给 import_svg，调整返回 element 的毫米位置与尺寸，"
+            "追加到文档 elements，再用 save_document 保存；导入本身不改文档、不移动机器。"
             "prepare_document 生成冻结方案和预览，不移动机器。"
             "只有用户明确要求书写时才 queue_job；execute 会操作实体机器，"
             "simulate 为演练。重试提交必须复用原 idempotency_key、plan_id 和 mode。"
@@ -71,7 +76,9 @@ def create_mcp(application):
 
     @server.tool(annotations=read)
     @in_worker
-    def list_documents(limit: Annotated[int, Field(ge=1, le=200)] = 100) -> dict[str, Any]:
+    def list_documents(
+        limit: Annotated[int, Field(ge=1, le=200)] = 100,
+    ) -> dict[str, Any]:
         """列出实例内最近更新的共享文档摘要，包含文档 ID 和版本。"""
         return {"data": documents.list_documents(limit)}
 
@@ -83,7 +90,9 @@ def create_mcp(application):
 
     @server.tool(annotations=write)
     @in_worker
-    def create_document(document: CanvasDocument, idempotency_key: Key) -> dict[str, Any]:
+    def create_document(
+        document: CanvasDocument, idempotency_key: Key
+    ) -> dict[str, Any]:
         """创建独立的共享文档；重试同一次创建须复用去重键。"""
         return documents.create(document, idempotency_key)
 
@@ -97,7 +106,25 @@ def create_mcp(application):
 
     @server.tool(annotations=read)
     @in_worker
-    def fit_table(document_id: str, revision: Revision, element_id: str) -> dict[str, Any]:
+    def import_svg(
+        source: Annotated[str, Field(max_length=1000000)],
+        name: Annotated[str, Field(max_length=120)] = "矢量图",
+    ) -> ImportResult:
+        """解析 SVG 源码并返回标准矢量 element；调整位置后加入文档，再 save_document。
+
+        支持路径、几何图形、分组变换、轮廓和填充；保留原始毫米尺寸。
+        本地文件由调用者读取后传入 source，不接收服务端文件路径或 URL。
+        """
+        element = checked(
+            workbench.import_vector, SvgImportRequest(source=source, name=name)
+        )
+        return ImportResult(element=element)
+
+    @server.tool(annotations=read)
+    @in_worker
+    def fit_table(
+        document_id: str, revision: Revision, element_id: str
+    ) -> dict[str, Any]:
         """计算表格自适应建议，不保存；检查返回元素后再 save_document。"""
         document = document_at(document_id, revision)
         return workbench.fit_document_table(
