@@ -1,4 +1,3 @@
-import copy
 from itertools import pairwise
 
 import pytest
@@ -147,45 +146,49 @@ def test_fit_only_shrinks_when_track_redistribution_is_insufficient():
 
 def test_preview_diagnostics_and_write_revalidate_bounds_missing_and_overflow(client):
     for element, code in [
-        (TextBox(id="t", x_mm=0, text="甲"), "bounds"),
         (TextBox(id="t", text="甲" * 100, width_mm=10, height_mm=10), "overflow"),
         (TextBox(id="t", text="A"), "missing"),
     ]:
         doc = CanvasDocument(elements=[element]).model_dump()
-        preview = client.post("/api/workbench/preview", json=doc).json()
-        assert not preview["can_print"]
+        preview = client.post("/api/v1/plans", json=doc).json()
+        assert preview["status"] == "blocked"
         assert any(d["code"] == code for d in preview["diagnostics"])
-        assert client.post("/api/workbench/write", json=doc).status_code == 400
+        assert (
+            client.post(
+                "/api/v1/jobs",
+                json={"plan_id": preview["id"], "mode": "simulate"},
+                headers={"Idempotency-Key": code},
+            ).status_code
+            == 409
+        )
 
 
 def test_fit_endpoint_freezes_geometry_and_new_document_job(client):
+    from pygmalion.execution import repository as store
+
     grid = table()
     grid.cells[0].text = "甲乙"
     doc = CanvasDocument(elements=[grid]).model_dump()
     response = client.post(
-        "/api/workbench/table-fit", json={"document": doc, "element_id": "table"}
+        "/api/v1/documents/fit-table", json={"document": doc, "element_id": "table"}
     )
-    data = response.json()
-    assert response.status_code == 200 and data["success"]
-    assert data["table"]["width_mm"] == 90 and data["table"]["height_mm"] == 60
+    assert response.status_code == 200
+    assert not response.json()["diagnostics"]
+    assert response.json()["element"]["width_mm"] == 90
     assert (
         client.post(
-            "/api/workbench/table-fit", json={"document": doc, "element_id": "unknown"}
+            "/api/v1/documents/fit-table",
+            json={"document": doc, "element_id": "unknown"},
         ).status_code
-        == 400
+        == 422
     )
-    preview = client.post("/api/workbench/preview", json=doc).json()
-    assert preview["can_print"]
-    result = client.post("/api/workbench/write", json=doc)
-    assert result.status_code == 200
-    job_id = result.json()["job_id"]
-    service = client.app.state.services.printer
-    frozen = service._prepared[job_id]
-    assert frozen.svg == preview["svg"]
-    assert frozen.gcode == prepare_canvas(CanvasDocument.model_validate(doc))[0].gcode
-    saved = copy.deepcopy(service.get(job_id).overrides)
+    plan = client.post("/api/v1/plans", json=doc).json()
+    frozen = store.get_plan(plan["id"])
+    assert (
+        frozen["program"] == prepare_canvas(CanvasDocument.model_validate(doc))[0].gcode
+    )
     doc["elements"][0]["cells"][0]["text"] = "丙"
-    assert service.get(job_id).overrides == saved
+    assert store.get_plan(plan["id"]) == frozen
 
 
 def test_canvas_schema_rejects_duplicate_ids_vertical_and_nonfinite_coordinates(client):
@@ -194,7 +197,7 @@ def test_canvas_schema_rejects_duplicate_ids_vertical_and_nonfinite_coordinates(
         {**valid, "elements": valid["elements"] * 2},
         {**valid, "elements": [{**valid["elements"][0], "direction": "vertical"}]},
     ]:
-        assert client.post("/api/workbench/preview", json=document).status_code == 422
+        assert client.post("/api/v1/plans", json=document).status_code == 422
     with pytest.raises(ValidationError):
         TextBox(id="bad", x_mm=float("inf"))
     long = CanvasDocument(
@@ -207,14 +210,14 @@ def test_fit_unknown_font_returns_actionable_error(client):
     grid = table(font="not-installed")
     grid.cells[0].text = "甲"
     response = client.post(
-        "/api/workbench/table-fit",
+        "/api/v1/documents/fit-table",
         json={
             "document": CanvasDocument(elements=[grid]).model_dump(),
             "element_id": grid.id,
         },
     )
-    assert response.status_code == 400
-    assert "字库不可用" in response.json()["error"]
+    assert response.status_code == 422
+    assert "字库不可用" in response.json()["error"]["message"]
 
 
 @pytest.mark.parametrize("limit", [5, 2, 7.5])
@@ -258,13 +261,15 @@ def test_table_segments_lift_pen_and_use_software_configuration(client):
     assert len([line for line in fine.gcode if line.startswith("G1 Z")]) == fine.strokes
     moves = [i for i, line in enumerate(fine.gcode) if line.startswith("G1 X")]
     assert all(fine.gcode[i + 1].startswith("G0 Z") for i in moves)
-    values = client.get("/api/admin/config").json()
+    values = client.get("/api/v1/settings/software").json()
     assert (
         next(f for f in values["fields"] if f["key"] == "table_segment_mm")["value"]
         == 2
     )
-    response = client.post(
-        "/api/admin/config", json={"values": {"table_segment_mm": 3}}
+    response = client.patch(
+        "/api/v1/settings/software",
+        json={"table_segment_mm": 3},
+        headers={"If-Match": values["etag"]},
     )
     assert (
         response.status_code == 200
@@ -276,3 +281,95 @@ def test_table_segments_lift_pen_and_use_software_configuration(client):
 def test_invalid_table_segment_limit_rejected(limit):
     with pytest.raises(ValueError):
         table_lines(table(), limit)
+
+
+@pytest.mark.parametrize("kind", ["text", "table"])
+def test_no_font_dataset_is_an_explicit_error(client, monkeypatch, tmp_path, kind):
+    from pygmalion.writing import canvas
+
+    monkeypatch.setattr(canvas, "ROOT", tmp_path / "no-fonts")
+    element = TextBox(id="t", text="甲") if kind == "text" else table()
+    doc = CanvasDocument(elements=[element])
+    with pytest.raises(ValueError, match="未找到书写字库"):
+        prepare_canvas(doc)
+    response = client.post("/api/v1/plans", json=doc.model_dump())
+    assert response.status_code == 201
+    assert response.json()["status"] == "blocked"
+    assert "未找到书写字库" in response.json()["diagnostics"][0]["message"]
+
+
+def test_empty_canvas_does_not_require_font_dataset(monkeypatch, tmp_path):
+    from pygmalion.writing import canvas
+
+    monkeypatch.setattr(canvas, "ROOT", tmp_path / "no-fonts")
+    prepared, overflow = prepare_canvas(CanvasDocument())
+    assert not prepared.can_print
+    assert not overflow
+
+
+def test_oversized_dataset_glyph_does_not_falsely_overflow_text_box(
+    monkeypatch, tmp_path
+):
+    from datasets import Dataset
+
+    from pygmalion.writing import canvas
+
+    directory = tmp_path / "model-bin" / "oversized"
+    directory.mkdir(parents=True)
+    Dataset.from_list(
+        [
+            {"char": ch, "lengths": [2], "x": [-5167, 5167], "y": [-4860, 4860]}
+            for ch in dict.fromkeys("今天的天气真好")
+        ]
+    ).to_parquet(directory / "train.parquet")
+    monkeypatch.setattr(canvas, "ROOT", tmp_path)
+    from pygmalion.writing import prepare
+
+    monkeypatch.setattr(prepare, "ROOT", tmp_path)
+    doc = CanvasDocument(
+        elements=[TextBox(id="t", width_mm=84, height_mm=43, text="今天的天气真好")]
+    )
+    prepared, overflow = prepare_canvas(doc)
+    assert not overflow
+    assert prepared.can_print
+    assert not prepared.diagnostics
+    # 缩小到真正放不下一个字时，必须继续阻止书写。
+    doc.elements[0].width_mm = 4
+    assert prepare_canvas(doc)[1]
+
+
+@pytest.mark.parametrize("x,y,w,h", [(-40, -25, 100, 50), (260, 350, 400, 100)])
+def test_paper_is_reference_and_outside_content_can_execute(client, x, y, w, h):
+    import re
+
+    from pygmalion.schemas.canvas import PenAnchor, Vector
+
+    doc = CanvasDocument(
+        elements=[
+            Vector(
+                id="outside",
+                x_mm=x,
+                y_mm=y,
+                width_mm=w,
+                height_mm=h,
+                paths=["M0 0 L1 1"],
+            )
+        ],
+        pen_anchor=PenAnchor(x_mm=-10, y_mm=500),
+    )
+    prepared, overflow = prepare_canvas(doc)
+    assert prepared.can_print and not overflow
+    assert not prepared.diagnostics
+    box = re.search(r'viewBox="([^"]+)"', prepared.svg).group(1)
+    left, top, width, height = map(float, box.split())
+    assert left <= x and top <= y
+    assert left + width >= x + w and top + height >= y + h
+    assert "stroke-dasharray" not in prepared.svg
+    plan = client.post("/api/v1/plans", json=doc.model_dump()).json()
+    assert plan["status"] == "ready"
+    response = client.post(
+        "/api/v1/jobs",
+        json={"plan_id": plan["id"], "mode": "simulate"},
+        headers={"Idempotency-Key": f"outside-{x}"},
+    )
+    assert response.status_code == 202

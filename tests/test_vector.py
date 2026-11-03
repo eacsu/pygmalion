@@ -124,7 +124,7 @@ def test_empty_dtd_and_bounds():
         Vector(id="v", paths=["M0 0 L2 1"])
     v = vector('<rect width="20" height="10"/>', x_mm=195)
     prepared, overflow = prepare_canvas(CanvasDocument(elements=[v]))
-    assert overflow and not prepared.can_print
+    assert not overflow and prepared.can_print
 
 
 def test_roundtrip_mixed_document():
@@ -137,21 +137,32 @@ def test_roundtrip_mixed_document():
 
 
 def test_import_preview_and_dry_run_write(client):
-    result = client.post(
-        "/api/workbench/import-svg",
-        json={"source": svg('<rect width="40" height="20"/>'), "name": "样图"},
+    from tests.test_public_api import wait
+
+    imported = client.post(
+        "/api/v1/imports/svg",
+        json={
+            "source": svg('<path fill="none" stroke="black" d="M0 0 L20 10"/>'),
+            "name": "矢量",
+        },
     )
-    assert result.status_code == 200, result.text
-    v = Vector(id="v", **result.json())
-    payload = CanvasDocument(elements=[v]).model_dump()
-    preview = client.post("/api/workbench/preview", json=payload)
-    assert preview.status_code == 200 and preview.json()["can_print"]
-    written = client.post("/api/workbench/write", json=payload)
-    assert written.status_code == 200 and written.json()["dry_run"]
-    bad = client.post(
-        "/api/workbench/import-svg", json={"source": svg("<text>no</text>")}
+    assert imported.status_code == 200, imported.text
+    doc = CanvasDocument(elements=[Vector.model_validate(imported.json()["element"])])
+    plan = client.post("/api/v1/plans", json=doc.model_dump()).json()
+    assert plan["status"] == "ready"
+    written = client.post(
+        "/api/v1/jobs",
+        json={"plan_id": plan["id"], "mode": "simulate"},
+        headers={"Idempotency-Key": "vector"},
     )
-    assert bad.status_code == 400
+    assert written.status_code == 202
+    assert wait(client, f"/api/v1/jobs/{written.json()['id']}")["status"] == "succeeded"
+    assert (
+        client.post(
+            "/api/v1/imports/svg", json={"source": svg("<text>no</text>")}
+        ).status_code
+        == 422
+    )
 
 
 def test_invisible_paints_and_implicit_fill_closure():
@@ -197,3 +208,14 @@ def test_transformed_ellipse_keeps_geometry_after_normalization_and_resize(trans
             20 + (py - cy + ey) / (2 * ey) * 200,
         )
         assert min(distance(expected, a, b) for a, b in pairwise(points)) <= 0.05001
+
+
+def test_import_preserves_dimensions_larger_than_reference_paper(client):
+    source = svg(
+        '<rect width="800" height="400"/>',
+        'width="800mm" height="400mm" viewBox="0 0 800 400"',
+    )
+    response = client.post("/api/v1/imports/svg", json={"source": source})
+    assert response.status_code == 200
+    assert response.json()["element"]["width_mm"] == pytest.approx(800)
+    assert response.json()["element"]["height_mm"] == pytest.approx(400)

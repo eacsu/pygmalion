@@ -9,9 +9,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import copy
 import json
 import os
-import copy
 import threading
 from pathlib import Path
 from typing import Any
@@ -85,6 +85,9 @@ DEFAULTS: dict[str, Any] = {
     },
     "fonts": {
         "default": "cjk-medians-plus",
+    },
+    "editor": {
+        "font_size_mm": 8.0,
     },
     "stroke_quality": {
         "enabled": True,

@@ -5,6 +5,7 @@ import pytest
 
 from pygmalion import config
 from pygmalion.machine import grbl
+from tests.test_public_api import wait
 
 
 @pytest.fixture
@@ -44,7 +45,9 @@ def fake_machine(monkeypatch, isolated_runtime):
             backups.append(reason)
             path = grbl.BACKUP_DIR / "grbl-settings-latest.txt"
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(datetime.now().strftime("%Y-%m-%d"), encoding="utf-8")
+            path.write_text(
+                datetime.now().astimezone().strftime("%Y-%m-%d"), encoding="utf-8"
+            )
             self.mark_backed_up()
             return path
 
@@ -65,244 +68,203 @@ def fake_machine(monkeypatch, isolated_runtime):
     return links, programs, backups, started, release
 
 
-def result(socket, identifier):
-    while True:
-        message = socket.receive_json()
-        if message.get("type") == "result" and message.get("id") == identifier:
-            return message
+def lease(client):
+    response = client.post(
+        "/api/v1/machine/control-sessions", headers={"Idempotency-Key": "controller"}
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
 
 
-def test_socket_orders_rapid_directions_reuses_serial_and_backup(client, fake_machine):
+def command(client, session, key, **payload):
+    response = client.post(
+        "/api/v1/machine/commands",
+        json={"session_id": session, **payload},
+        headers={"Idempotency-Key": key},
+    )
+    assert response.status_code == 202, response.text
+    return response.json()["id"]
+
+
+def test_commands_order_rapid_directions_reuse_serial_and_backup(client, fake_machine):
     links, programs, backups, _, _ = fake_machine
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        assert socket.receive_json()["type"] == "connected"
-        socket.send_json({"id": 1, "type": "inspect"})
-        assert result(socket, 1)["port"] == "COM17"
-        for identifier, axis, dist in [(2, "x", 1), (3, "y", -1), (4, "x", -1)]:
-            socket.send_json(
-                {
-                    "id": identifier,
-                    "type": "jog",
-                    "payload": {"action": axis, "dist": dist},
-                }
-            )
-        for identifier in (2, 3, 4):
-            assert result(socket, identifier)["ok"]
-        assert [program[1] for program in programs] == [
-            "G1 X1 F3000",
-            "G1 Y-1 F3000",
-            "G1 X-1 F3000",
-        ]
-        assert len(links) == len(backups) == 1
-        assert links[0].is_open
-    assert not links[0].is_open
-    assert not client.app.state.services.machine.manual_control_lock.locked()
-
-
-def test_socket_limits_pending_moves(client, fake_machine):
-    _, programs, _, started, release = fake_machine
-    release.clear()
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        socket.send_json(
-            {"id": 1, "type": "jog", "payload": {"action": "x", "dist": 1}}
+    session = lease(client)
+    identifiers = [
+        command(
+            client, session, str(index), type="jog", axis=axis, distance_mm=distance
         )
-        assert started.wait(2)
-        for identifier in (2, 3, 4, 5):
-            socket.send_json(
-                {"id": identifier, "type": "jog", "payload": {"action": "y", "dist": 1}}
+        for index, (axis, distance) in enumerate([("x", 1), ("y", -1), ("x", -1)])
+    ]
+    for identifier in identifiers:
+        assert wait(client, "/api/v1/operations/" + identifier)["status"] == "succeeded"
+    assert len(links) == 1 and len(backups) == 1
+    assert [program[1] for program in programs] == [
+        "G1 X1 F3000",
+        "G1 Y-1 F3000",
+        "G1 X-1 F3000",
+    ]
+    client.delete("/api/v1/machine/control-sessions/" + session)
+    assert not links[0].is_open
+
+
+def test_pending_operations_are_bounded(client, fake_machine):
+    _, programs, _, started, release = fake_machine
+    session = lease(client)
+    release.clear()
+    identifiers = []
+    try:
+        for index in range(4):
+            identifiers.append(
+                command(
+                    client, session, str(index), type="jog", axis="x", distance_mm=1
+                )
             )
-        assert "已满" in result(socket, 5)["error"]
+        assert started.wait(2)
+        response = client.post(
+            "/api/v1/machine/commands",
+            json={"type": "jog", "axis": "x", "distance_mm": 1, "session_id": session},
+            headers={"Idempotency-Key": "overflow"},
+        )
+        assert response.status_code == 409
+    finally:
         release.set()
-        for identifier in (1, 2, 3, 4):
-            assert result(socket, identifier)["ok"]
+    for identifier in identifiers:
+        wait(client, "/api/v1/operations/" + identifier)
     assert len(programs) == 4
 
 
-def test_socket_cancels_unsent_moves(client, fake_machine):
-    _, programs, _, started, release = fake_machine
+def test_releasing_session_drops_unsent_motion(client, fake_machine):
+    _links, programs, _, started, release = fake_machine
+    session = lease(client)
     release.clear()
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        socket.send_json(
-            {"id": 1, "type": "jog", "payload": {"action": "x", "dist": 1}}
-        )
+    first = command(client, session, "first", type="jog", axis="x", distance_mm=1)
+    try:
         assert started.wait(2)
-        socket.send_json(
-            {"id": 2, "type": "jog", "payload": {"action": "y", "dist": 1}}
+        second = command(client, session, "second", type="jog", axis="y", distance_mm=1)
+        response = client.delete("/api/v1/machine/control-sessions/" + session)
+        assert response.json()["status"] == "closing"
+        assert (
+            client.post(
+                "/api/v1/serial-probes", json={}, headers={"Idempotency-Key": "probe"}
+            ).status_code
+            == 409
         )
-        socket.send_json({"id": 3, "type": "cancel_pending"})
-        assert result(socket, 2)["cancelled"]
-        assert result(socket, 3)["ok"]
+    finally:
         release.set()
-        assert result(socket, 1)["ok"]
+    wait(client, "/api/v1/operations/" + first)
+    assert wait(client, "/api/v1/operations/" + second)["status"] == "cancelled"
     assert len(programs) == 1
 
 
-def test_socket_disconnect_releases_port_before_maintenance(client, fake_machine):
-    links, _, _, _, _ = fake_machine
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        socket.send_json({"id": 1, "type": "inspect"})
-        assert result(socket, 1)["ok"]
-        assert (
-            client.post("/api/admin/serial-port", json={"port": "COM18"}).status_code
-            == 409
-        )
-        socket.send_json({"id": 2, "type": "disconnect"})
-        assert result(socket, 2)["ok"]
-        assert not links[0].is_open
-        assert (
-            client.post("/api/admin/serial-port", json={"port": "COM18"}).status_code
-            == 200
-        )
-
-
-def test_socket_rejects_second_controller(client, fake_machine):
-    with client.websocket_connect("/api/admin/machine/ws") as first:
-        assert first.receive_json()["type"] == "connected"
-        with client.websocket_connect("/api/admin/machine/ws") as second:
-            assert "另一个页面" in second.receive_json()["error"]
+def test_second_controller_is_refused_and_observer_is_allowed(client, fake_machine):
+    lease(client)
+    assert (
+        client.post(
+            "/api/v1/machine/control-sessions", headers={"Idempotency-Key": "other"}
+        ).status_code
+        == 409
+    )
+    with client.websocket_connect("/api/v1/events") as socket:
+        assert socket.receive_json()["type"] == "machine.updated"
+    assert not fake_machine[0]
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"action": "x", "dist": "NaN"},
-        {"action": "x", "dist": 100},
-        [],
-        {"action": "G1X100"},
+        {"type": "jog", "axis": "x", "distance_mm": 0},
+        {"type": "jog", "axis": "z", "distance_mm": 1},
+        {"type": "jog", "axis": "x", "distance_mm": 61},
+        {"type": "jog", "axis": "x", "distance_mm": "NaN"},
     ],
 )
-def test_socket_validates_before_opening_machine(client, fake_machine, payload):
-    links, programs, _, _, _ = fake_machine
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        socket.send_json({"id": 1, "type": "jog", "payload": payload})
-        assert not result(socket, 1)["ok"]
-    assert links == programs == []
+def test_invalid_command_never_opens_machine(client, fake_machine, payload):
+    session = lease(client)
+    response = client.post(
+        "/api/v1/machine/commands",
+        json={"session_id": session, **payload},
+        headers={"Idempotency-Key": "invalid"},
+    )
+    assert response.status_code == 422
+    assert not fake_machine[0]
 
 
-def test_socket_refuses_motion_while_printing(client, fake_machine):
-    links, programs, _, _, _ = fake_machine
-    service = client.app.state.services.printer
-    service._current = object()
-    try:
-        with client.websocket_connect("/api/admin/machine/ws") as socket:
-            socket.receive_json()
-            socket.send_json(
-                {"id": 1, "type": "jog", "payload": {"action": "x", "dist": 1}}
-            )
-            assert not result(socket, 1)["ok"]
-        assert links == programs == []
-    finally:
-        service._current = None
+def test_duplicate_motion_key_does_not_repeat(client, fake_machine):
+    session = lease(client)
+    original = command(client, session, "same", type="jog", axis="x", distance_mm=1)
+    wait(client, "/api/v1/operations/" + original)
+    assert (
+        command(client, session, "same", type="jog", axis="x", distance_mm=1)
+        == original
+    )
+    assert len(fake_machine[1]) == 1
+    response = client.post(
+        "/api/v1/machine/commands",
+        json={"session_id": session, "type": "jog", "axis": "y", "distance_mm": 1},
+        headers={"Idempotency-Key": "same"},
+    )
+    assert response.status_code == 409
 
 
-def test_serial_failure_closes_link_and_drops_pending(
+def test_serial_failure_closes_link_and_cancels_following_commands(
     client, fake_machine, monkeypatch
 ):
-    links, programs, _, started, release = fake_machine
-    release.clear()
-    constructor = grbl.GrblLink
-
-    def failing(*args, **kwargs):
-        link = constructor(*args, **kwargs)
-
-        def fail(program):
-            started.set()
-            assert release.wait(5)
-            raise grbl.GrblError("设备已断线")
-
-        link.run_program = fail
-        return link
-
-    monkeypatch.setattr(grbl, "GrblLink", failing)
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        socket.send_json(
-            {"id": 1, "type": "jog", "payload": {"action": "x", "dist": 1}}
-        )
-        assert started.wait(2)
-        socket.send_json(
-            {"id": 2, "type": "jog", "payload": {"action": "y", "dist": 1}}
-        )
-        release.set()
-        assert "断线" in result(socket, 1)["error"]
-        assert result(socket, 2)["cancelled"]
-        assert not links[0].is_open
-    assert programs == []
-
-
-def test_print_connection_releases_manual_port_before_opening(client, fake_machine):
-    links, _, _, _, _ = fake_machine
-    service = client.app.state.services.printer
-    with service.controller.device_connection(config.CONFIG["machine"], reuse=True):
-        pass
-    with service.controller.device_connection(config.CONFIG["machine"]):
-        assert not links[0].is_open and links[1].is_open
-    assert not links[1].is_open
-
-
-def test_socket_pushes_status_without_another_read_command(client, fake_machine):
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        socket.send_json({"id": 1, "type": "inspect"})
-        assert result(socket, 1)["ok"]
-        message = socket.receive_json()
-        assert message["type"] == "state" and message["state"]["state"] == "Idle"
-
-
-def test_socket_rejects_replayed_motion_id(client, fake_machine):
-    _, programs, _, _, _ = fake_machine
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        command = {"id": 1, "type": "jog", "payload": {"action": "x", "dist": 1}}
-        socket.send_json(command)
-        assert result(socket, 1)["ok"]
-        socket.send_json(command)
-        while True:
-            message = socket.receive_json()
-            if message["type"] == "error":
-                assert "重复执行" in message["error"]
-                break
-    assert len(programs) == 1
-
-
-def test_socket_disconnect_drops_queued_motion(client, fake_machine):
-    links, programs, _, started, release = fake_machine
-    release.clear()
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        socket.send_json(
-            {"id": 1, "type": "jog", "payload": {"action": "x", "dist": 1}}
-        )
-        assert started.wait(2)
-        socket.send_json(
-            {"id": 2, "type": "jog", "payload": {"action": "y", "dist": 1}}
-        )
-        while True:
-            message = socket.receive_json()
-            if message["type"] == "queued" and message["id"] == 2:
-                break
-        timer = threading.Timer(0.1, release.set)
-        timer.start()
-    timer.join()
-    assert len(programs) == 1 and not links[0].is_open
-
-
-def test_socket_backup_failure_prevents_motion(client, fake_machine, monkeypatch):
     links, programs, _, _, _ = fake_machine
+    session = lease(client)
+    entered, release = threading.Event(), threading.Event()
 
-    def fail_backup(*args, **kwargs):
-        raise OSError("备份写入失败")
+    def fail_program(link, program):
+        entered.set()
+        assert release.wait(3)
+        raise OSError("connection lost")
 
-    monkeypatch.setattr(grbl, "ensure_backup_today", fail_backup)
-    with client.websocket_connect("/api/admin/machine/ws") as socket:
-        socket.receive_json()
-        socket.send_json(
-            {"id": 1, "type": "jog", "payload": {"action": "x", "dist": 1}}
+    monkeypatch.setattr(grbl.GrblLink, "run_program", fail_program)
+    first = command(client, session, "fail", type="jog", axis="x", distance_mm=1)
+    try:
+        assert entered.wait(2)
+        second = command(
+            client, session, "pending", type="jog", axis="y", distance_mm=1
         )
-        assert "备份写入失败" in result(socket, 1)["error"]
-        assert not links[0].is_open
-    assert programs == []
+    finally:
+        release.set()
+    assert wait(client, "/api/v1/operations/" + first)["status"] == "interrupted"
+    assert wait(client, "/api/v1/operations/" + second)["status"] == "cancelled"
+    assert not links[0].is_open and not programs
+
+
+def test_backup_failure_prevents_motion(client, fake_machine, monkeypatch):
+    session = lease(client)
+
+    def fail(*args, **kwargs):
+        raise OSError("backup failed")
+
+    monkeypatch.setattr(grbl, "ensure_backup_today", fail)
+    operation = command(
+        client, session, "backup-failure", type="jog", axis="x", distance_mm=1
+    )
+    result = wait(client, "/api/v1/operations/" + operation)
+    assert result["status"] in ("failed", "interrupted")
+    assert not fake_machine[1]
+
+
+def test_idle_session_poll_pushes_coordinates_without_extra_refresh(
+    client, fake_machine
+):
+    session = lease(client)
+    response = client.post(
+        "/api/v1/machine/refresh",
+        json={"session_id": session},
+        headers={"Idempotency-Key": "read"},
+    )
+    wait(client, "/api/v1/operations/" + response.json()["id"])
+    fake_machine[1].append(["external-test-move"])
+    with client.websocket_connect("/api/v1/events") as socket:
+        for _ in range(20):
+            event = socket.receive_json()
+            if (
+                event["type"] == "machine.updated"
+                and event["data"]["state"].get("MPos") == "1,0,0"
+            ):
+                break
+        else:
+            raise AssertionError("未推送采样坐标")

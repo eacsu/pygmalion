@@ -41,7 +41,12 @@ function validate(
   const value = Number(trimmed);
   if (!Number.isFinite(value) || value < min || value > max)
     return {
-      error: `请输入 ${Number(min.toFixed(3))}–${Number(max.toFixed(3))} ${unit} 范围内的数值`,
+      error:
+        Number.isFinite(min) && Number.isFinite(max)
+          ? `请输入 ${Number(min.toFixed(3))}–${Number(max.toFixed(3))} ${unit} 范围内的数值`
+          : Number.isFinite(min)
+            ? `请输入不小于 ${min} ${unit} 的有限数值`
+            : "请输入有限数值",
       invalid: true,
     };
   return { value, invalid: false, error: undefined };

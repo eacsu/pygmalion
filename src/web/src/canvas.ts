@@ -55,14 +55,8 @@ export function newVector(
     "name" | "paths" | "width_mm" | "height_mm" | "fill_rules" | "draw_mode"
   >,
 ): VectorElement {
-  const [w, h] = pageSize(d);
-  const ratio = Math.min(
-    1,
-    (w - 2 * d.margin_mm) / data.width_mm,
-    (h - 2 * d.margin_mm) / data.height_mm,
-  );
-  const width = data.width_mm * ratio,
-    height = data.height_mm * ratio;
+  const width = data.width_mm,
+    height = data.height_mm;
   return {
     ...data,
     type: "vector",
@@ -83,6 +77,7 @@ export interface WritingDocument {
   paper: "A4" | "A5";
   margin_mm: number;
   elements: PaperElement[];
+  pen_anchor?: { x_mm: number; y_mm: number } | null;
 }
 export interface Diagnostic {
   element_id: string;
@@ -108,8 +103,7 @@ export function pageSize(d: WritingDocument) {
   return d.paper === "A4" ? [210, 297] : [148, 210];
 }
 function placement(d: WritingDocument, w: number, h: number) {
-  const [pw, ph] = pageSize(d),
-    m = d.margin_mm;
+  const m = d.margin_mm;
   const candidates = [
     { x: m, y: m },
     ...d.elements.flatMap((e) => [
@@ -120,8 +114,6 @@ function placement(d: WritingDocument, w: number, h: number) {
   return (
     candidates.find(
       (p) =>
-        p.x + w <= pw - m &&
-        p.y + h <= ph - m &&
         !d.elements.some(
           (e) =>
             p.x < e.x_mm + e.width_mm &&
@@ -132,13 +124,18 @@ function placement(d: WritingDocument, w: number, h: number) {
     ) || { x: m, y: m }
   );
 }
-export function newText(d: WritingDocument, text = ""): TextBox {
+export function newText(
+  d: WritingDocument,
+  text = "",
+  fontSize = defaultStyle.font_size_mm,
+): TextBox {
   const [w, h] = pageSize(d),
     m = d.margin_mm;
   const boxWidth = Math.min(100, w - 2 * m);
   const position = placement(d, boxWidth, Math.min(60, h - 2 * m));
   return {
     ...defaultStyle,
+    font_size_mm: fontSize,
     id: crypto.randomUUID(),
     type: "text",
     text,
@@ -160,7 +157,10 @@ export function newCell(row: number, col: number): Cell {
     valign: "center",
   };
 }
-export function newTable(d: WritingDocument): Table {
+export function newTable(
+  d: WritingDocument,
+  fontSize = defaultStyle.font_size_mm,
+): Table {
   const [w, h] = pageSize(d),
     m = d.margin_mm;
   const width = Math.min(120, w - 2 * m),
@@ -168,6 +168,7 @@ export function newTable(d: WritingDocument): Table {
   const position = placement(d, width, height);
   return {
     ...defaultStyle,
+    font_size_mm: fontSize,
     id: crypto.randomUUID(),
     type: "table",
     x_mm: position.x,
@@ -379,6 +380,13 @@ export function readDocument(raw: unknown): WritingDocument {
   )
     throw new Error("文档字段不正确");
   const ids = new Set<string>();
+  if (
+    d.pen_anchor != null &&
+    (typeof d.pen_anchor !== "object" ||
+      !Number.isFinite(d.pen_anchor.x_mm) ||
+      !Number.isFinite(d.pen_anchor.y_mm))
+  )
+    throw new Error("笔头定位点必须是有限毫米坐标");
   let count = 0;
   let vectorSize = 0;
   for (const e of d.elements) {
@@ -390,8 +398,8 @@ export function readDocument(raw: unknown): WritingDocument {
       !["text", "table", "vector"].includes(e.type) ||
       !Number.isFinite(e.x_mm) ||
       !Number.isFinite(e.y_mm) ||
-      !finite(e.width_mm, 0.001, 297) ||
-      !finite(e.height_mm, 0.001, 297) ||
+      !finite(e.width_mm, 0.001, Infinity) ||
+      !finite(e.height_mm, 0.001, Infinity) ||
       (e.type !== "vector" &&
         (!string(e.font, 240) ||
           !finite(e.font_size_mm, 4, 40) ||
@@ -447,7 +455,7 @@ export function readDocument(raw: unknown): WritingDocument {
         e.column_widths.length > 40 ||
         e.row_heights.length > 80 ||
         ![...e.column_widths, ...e.row_heights].every((v) =>
-          finite(v, 0.001, 297),
+          finite(v, 0.001, Infinity),
         ) ||
         Math.abs(e.column_widths.reduce((a, b) => a + b, 0) - e.width_mm) >
           0.00001 ||
@@ -490,4 +498,14 @@ export function readDocument(raw: unknown): WritingDocument {
   if (vectorSize > 1000000) throw new Error("整页矢量路径数据不能超过 1 MB");
   if (count > 20000) throw new Error("整页文字不能超过20000字符");
   return structuredClone(d);
+}
+
+/** 预览与服务端使用相同毫米范围，纸外内容保留原位置。 */
+export function previewBounds(d: WritingDocument) {
+  const [w, h] = pageSize(d);
+  const left = Math.min(0, ...d.elements.map((e) => e.x_mm));
+  const top = Math.min(0, ...d.elements.map((e) => e.y_mm));
+  const right = Math.max(w, ...d.elements.map((e) => e.x_mm + e.width_mm));
+  const bottom = Math.max(h, ...d.elements.map((e) => e.y_mm + e.height_mm));
+  return { left, top, width: right - left, height: bottom - top };
 }
