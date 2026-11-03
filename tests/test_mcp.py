@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 from pygmalion.schemas.canvas import CanvasDocument, TextBox
@@ -20,8 +21,8 @@ def rpc(client, method, params=None):
     return response.json()["result"]
 
 
-def call(client, name, **arguments):
-    return rpc(client, "tools/call", {"name": name, "arguments": arguments})
+def call(client, tool_name, **arguments):
+    return rpc(client, "tools/call", {"name": tool_name, "arguments": arguments})
 
 
 def result(value):
@@ -42,7 +43,13 @@ def test_mcp_handshake_catalog_and_stateless_connections(client):
     assert info["serverInfo"]["name"] == "Pygmalion"
     assert "save_document" in info["instructions"]
     tools = {t["name"]: t for t in rpc(client, "tools/list")["tools"]}
-    assert len(tools) == 11
+    assert len(tools) == 12
+    assert tools["import_svg"]["annotations"]["readOnlyHint"]
+    assert tools["import_svg"]["inputSchema"]["required"] == ["source"]
+    assert (
+        tools["import_svg"]["inputSchema"]["properties"]["source"]["maxLength"]
+        == 1000000
+    )
     assert tools["get_document"]["annotations"]["readOnlyHint"]
     assert tools["queue_job"]["annotations"]["openWorldHint"]
     assert set(tools["queue_job"]["inputSchema"]["required"]) == {
@@ -132,3 +139,93 @@ def test_mcp_preview_and_idempotent_simulated_queue(client):
     )
     assert error["isError"]
     assert "execution_disabled" in json.dumps(error, ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    "source,mode,width,height",
+    [
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="120mm" viewBox="0 0 300 120"><rect width="300" height="120" fill="none" stroke="black"/></svg>',
+            "outline",
+            300,
+            120,
+        ),
+        (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M0 0H40V20H0Z M10 5H30V15H10Z" fill="black" fill-rule="evenodd"/></svg>',
+            "solid",
+            40,
+            20,
+        ),
+    ],
+    ids=["outline-original-size", "solid-evenodd"],
+)
+def test_mcp_import_svg_save_and_preview_existing_document(
+    client, source, mode, width, height
+):
+    original = CanvasDocument(
+        name="现有文档",
+        elements=[TextBox(id="t", text="甲乙")],
+        pen_anchor={"x_mm": 23.5, "y_mm": 29.5},
+    ).model_dump()
+    created = result(
+        call(client, "create_document", document=original, idempotency_key="svg-target")
+    )
+    imported = result(call(client, "import_svg", source=source, name="智能体导入"))
+    element = imported["element"]
+    assert element["type"] == "vector" and element["name"] == "智能体导入"
+    assert element["width_mm"] == pytest.approx(width)
+    assert element["height_mm"] == pytest.approx(height)
+    assert element["draw_mode"] == mode
+    if mode == "solid":
+        assert element["fill_rules"] == ["evenodd"]
+    # 转换阶段没有修改目标文档，也没有创建任务。
+    assert result(call(client, "get_document", document_id=created["id"])) == created
+    assert client.get("/api/v1/jobs").json()["data"] == []
+    http = client.post(
+        "/api/v1/imports/svg", json={"source": source, "name": "智能体导入"}
+    )
+    assert http.status_code == 200
+    assert {k: v for k, v in http.json()["element"].items() if k != "id"} == {
+        k: v for k, v in element.items() if k != "id"
+    }
+    element.update(
+        x_mm=-40, y_mm=100, width_mm=40, height_mm=16 if mode == "outline" else 20
+    )
+    document = {**original, "elements": [*original["elements"], element]}
+    saved = result(
+        call(
+            client,
+            "save_document",
+            document_id=created["id"],
+            revision=1,
+            document=document,
+        )
+    )
+    assert saved["revision"] == 2
+    assert (
+        client.get(f"/api/v1/documents/{created['id']}").json()["document"] == document
+    )
+    plan = result(
+        call(client, "prepare_document", document_id=created["id"], revision=2)
+    )
+    assert plan["status"] == "ready" and plan["strokes"] > 1
+    assert "<svg" in result(call(client, "get_plan_preview", plan_id=plan["id"]))["svg"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "<svg>",
+        '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+        '<!DOCTYPE svg [<!ENTITY x "abc">]><svg/>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://example.com/a.png"/></svg>',
+        "x" * 1000001,
+    ],
+    ids=["malformed", "script", "dtd", "bitmap", "oversized"],
+)
+def test_mcp_import_svg_rejects_unsupported_or_oversized_sources(client, source):
+    error = call(client, "import_svg", source=source)
+    assert error["isError"]
+    assert error["content"][0]["type"] == "text"
+    assert result(call(client, "list_documents"))["data"] == []
+    assert client.get("/api/v1/jobs").json()["data"] == []

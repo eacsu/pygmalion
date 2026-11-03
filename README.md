@@ -35,7 +35,7 @@ poetry run app serve --api-only --dry-run --host 127.0.0.1
 
 接口文档：`/docs`，契约：`/openapi.json`，完整调用及故障语义见 [公开接口 v1](docs/api-v1.md)。
 
-Codex 可通过同一实例的 `/mcp/` 读取和修改文档排版、准备笔迹预览及操作任务队列。连接命令为 `codex mcp add pygmalion --url http://127.0.0.1:8080/mcp/`，更新后需重启服务；完整配置与使用示例见 [Codex / MCP 接入](docs/mcp.md)。
+Codex 可通过同一实例的 `/mcp/` 读取和修改文档排版、直接导入 SVG、准备笔迹预览及操作任务队列。连接命令为 `codex mcp add pygmalion --url http://127.0.0.1:8080/mcp/`，更新后需重启服务；完整配置与使用示例见 [Codex / MCP 接入](docs/mcp.md)。
 
 支持 `PYGMALION_API_ONLY`、`PYGMALION_HOST`、`PYGMALION_PORT`、`PYGMALION_DRY_RUN`、`PYGMALION_HOME`、`PYGMALION_FONTS_DIR`。运行数据根目录默认是仓库；使用 `--data-home` 指定另一目录时，默认从该目录下的 `model-bin/` 读取字体；也可用 `--fonts-dir` 或 `PYGMALION_FONTS_DIR` 独立指定字体数据集父目录，无需复制字库。字体只支持 Hugging Face Parquet 数据集，不再读取 JSON、CNC Draw 或内置几何/西文字库。`.env.example` 提供示例，VS Code 调试配置读取 `.env`。
 
