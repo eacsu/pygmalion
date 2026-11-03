@@ -15,12 +15,17 @@ export default defineConfig({
     command:
       "poetry run python -m pygmalion.commands.app serve --port 8097 --dry-run",
     cwd: "../..",
-    url: "http://127.0.0.1:8097/api/health",
+    url: "http://127.0.0.1:8097/api/v1/health",
     reuseExistingServer: false,
     env: {
       PYGMALION_HOME: path.resolve("../../.cache/e2e"),
       PYGMALION_FONTS_DIR: "model-bin",
       PYTHONUTF8: "1",
+      PYGMALION_TEST_NO_HARDWARE: "1",
+      PYTHONPATH: [
+        path.resolve("../../tests/no_hardware"),
+        path.resolve("../../src"),
+      ].join(path.delimiter),
     },
   },
 });

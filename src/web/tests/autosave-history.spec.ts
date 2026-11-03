@@ -30,8 +30,11 @@ async function inputAndRead(editor: Locator, value: string) {
 }
 
 test("逐字同步保存，预览失败和未失焦都不阻止刷新恢复", async ({ page }) => {
-  await page.route("**/api/workbench/preview", (route) =>
-    route.fulfill({ status: 503, json: { error: "预览暂不可用" } }),
+  await page.route("**/api/v1/plans", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: { code: "test_failure", message: "预览暂不可用" } },
+    }),
   );
   await page.goto("/");
   const editor = await addText(page);
@@ -39,7 +42,9 @@ test("逐字同步保存，预览失败和未失焦都不阻止刷新恢复", as
     expect((await inputAndRead(editor, value))[0].text).toBe(value);
     await expect(editor).toBeFocused();
   }
-  await expect(page.locator(".document-save-status")).toHaveText("已自动保存");
+  await expect(page.locator(".document-save-status")).toHaveText(
+    "已保存到服务端",
+  );
   let dialogs = 0;
   page.on("dialog", async (dialog) => {
     dialogs++;
@@ -53,6 +58,9 @@ test("逐字同步保存，预览失败和未失焦都不阻止刷新恢复", as
   const name = page.getByLabel("文档名称", { exact: true });
   await name.fill("逐字保存的文档");
   expect((await stored(page)).name).toBe("逐字保存的文档");
+  await expect(page.locator(".document-save-status")).toHaveText(
+    "已保存到服务端",
+  );
   await page.reload();
   await expect(name).toHaveValue("逐字保存的文档");
 });
@@ -169,31 +177,25 @@ test("表格单元格逐字保存，中文组合输入不触发撤销，确认�
   await expect(borders).toBeChecked();
 });
 
-test("保存失败保留文字，导出仍可用，手动重试和下次输入都能恢复", async ({
-  page,
-}) => {
+test("服务端保存失败保留草稿、仍可导出并明确重试", async ({ page }) => {
   await page.goto("/");
   const editor = await addText(page);
   await editor.fill("甲");
-  await page.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    Object.assign(window, {
-      restoreDraftStorage: () => {
-        Storage.prototype.setItem = original;
-      },
-    });
-    Storage.prototype.setItem = function (key, value) {
-      if (key === "pygmalion-document-v2")
-        throw new DOMException("空间不足", "QuotaExceededError");
-      return original.call(this, key, value);
-    };
-  });
-  await editor.fill("甲乙");
-  await expect(editor).toHaveValue("甲乙");
-  await expect(page.locator(".document-save-status")).toContainText(
-    "自动保存失败",
+  await expect(page.locator(".document-save-status")).toHaveText(
+    "已保存到服务端",
   );
-  expect((await stored(page)).elements[0].text).toBe("甲");
+  const id = new URL(page.url()).searchParams.get("document")!;
+  await page.route(`**/api/v1/documents/${id}`, (route) =>
+    route.request().method() === "PUT"
+      ? route.abort("failed")
+      : route.continue(),
+  );
+  await editor.fill("甲乙");
+  await expect(page.locator(".document-save-status")).toContainText(
+    "服务端保存失败",
+  );
+  await expect(editor).toHaveValue("甲乙");
+  expect((await stored(page)).elements[0].text).toBe("甲乙");
   expect(
     await page.evaluate(
       () =>
@@ -208,58 +210,38 @@ test("保存失败保留文字，导出仍可用，手动重试和下次输入�
     JSON.parse(await fs.readFile((await file.path())!, "utf8")).elements[0]
       .text,
   ).toBe("甲乙");
-  await page.evaluate(() =>
-    (
-      window as unknown as { restoreDraftStorage: () => void }
-    ).restoreDraftStorage(),
+  await page.getByRole("button", { name: "重试保存", exact: true }).focus();
+  await page.unroute(`**/api/v1/documents/${id}`);
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".document-save-status")).toHaveText(
+    "已保存到服务端",
   );
-  await page.getByRole("button", { name: "重试保存", exact: true }).click();
-  expect((await stored(page)).elements[0].text).toBe("甲乙");
-  await expect(page.locator(".document-save-status")).toHaveText("已自动保存");
   expect(
     await page.evaluate(
       () =>
         !window.dispatchEvent(new Event("beforeunload", { cancelable: true })),
     ),
   ).toBe(false);
-
-  await page.getByRole("button", { name: /^文本框：/ }).click();
-  await page.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (key, value) {
-      if (key === "pygmalion-document-v2") {
-        Storage.prototype.setItem = original;
-        throw new DOMException("暂时不可写", "QuotaExceededError");
-      }
-      return original.call(this, key, value);
-    };
-  });
-  await editor.fill("甲乙丙");
-  await expect(page.locator(".document-save-status")).toContainText(
-    "自动保存失败",
-  );
-  expect((await stored(page)).elements[0].text).toBe("甲乙");
-  await editor.fill("甲乙丙丁");
-  expect((await stored(page)).elements[0].text).toBe("甲乙丙丁");
-  await expect(page.locator(".document-save-status")).toHaveText("已自动保存");
 });
 
-test("新建确认不受自动保存影响，取消保留逐字草稿，确认新建也立即持久化", async ({
-  page,
-}) => {
+test("新建生成独立数据库文档，旧文档仍可读取", async ({ page, request }) => {
   await page.goto("/");
   const editor = await addText(page);
   await editor.fill("甲乙");
+  await expect(page.locator(".document-save-status")).toHaveText(
+    "已保存到服务端",
+  );
+  const original = new URL(page.url()).searchParams.get("document")!;
   await page.getByRole("button", { name: "新建", exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("尚未导出文件");
-  const before = await stored(page);
-  await page.keyboard.press("Control+z");
-  expect(await stored(page)).toEqual(before);
-  await page.getByRole("button", { name: "取消", exact: true }).click();
-  expect((await stored(page)).elements[0].text).toBe("甲乙");
-  await page.getByRole("button", { name: "新建", exact: true }).click();
-  await page.getByRole("button", { name: "继续新建", exact: true }).click();
-  expect((await stored(page)).elements).toEqual([]);
+  await expect(page.locator(".paper-element")).toHaveCount(0);
+  await expect(page.locator(".document-save-status")).toHaveText(
+    "已保存到服务端",
+  );
+  expect(new URL(page.url()).searchParams.get("document")).not.toBe(original);
+  expect(
+    (await (await request.get(`/api/v1/documents/${original}`)).json()).document
+      .elements[0].text,
+  ).toBe("甲乙");
   await page.reload();
   await expect(page.locator(".paper-element")).toHaveCount(0);
 });
@@ -293,11 +275,13 @@ test("超过既有文字上限时保留可恢复草稿，修正后自动保存�
   await editor.fill("甲".repeat(20001));
   await expect(editor).toHaveValue("甲".repeat(20001));
   await expect(page.locator(".document-save-status")).toContainText(
-    "自动保存失败",
+    "服务端保存失败",
   );
   expect((await stored(page)).elements[0].text).toBe("甲乙");
   await editor.fill("甲乙丙");
-  await expect(page.locator(".document-save-status")).toHaveText("已自动保存");
+  await expect(page.locator(".document-save-status")).toHaveText(
+    "已保存到服务端",
+  );
   await page.reload();
   await expect(
     page.getByRole("button", { name: "文本框：甲乙丙", exact: true }),

@@ -5,7 +5,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { formatDuration, estimateHelp } from "./timing";
 import { PaperRulers } from "./PaperRulers";
+import { DefaultFontSize } from "./DefaultFontSize";
+import { PenAnchorMarker } from "./PenAnchorMarker";
 import { NumberField, NumberFieldsProvider } from "./NumberField";
 import { usePaperViewport } from "./usePaperViewport";
 import { useResource, type Fonts } from "./api";
@@ -16,6 +19,7 @@ import {
   elementName,
   newTable,
   pageSize,
+  previewBounds,
   resizeElement,
   cellBox,
   mergeCells,
@@ -92,6 +96,8 @@ type WorkbenchProps = {
   model: WorkbenchModel;
   documentHost: HTMLDivElement | null;
   busy: boolean;
+  onHelp: () => void;
+  onOpenLibrary: () => void;
 };
 
 export function Workbench(props: WorkbenchProps) {
@@ -102,8 +108,71 @@ export function Workbench(props: WorkbenchProps) {
   );
 }
 
-function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
+function WorkbenchContent({
+  model: m,
+  documentHost,
+  busy,
+  onHelp,
+  onOpenLibrary,
+}: WorkbenchProps) {
   const root = useRef<HTMLDivElement>(null);
+  const d = m.document;
+  const inkBounds = previewBounds(d);
+  const [selected, setSelected] = useState<string>();
+  const [penSelected, setPenSelected] = useState(false);
+  const [allSelected, setAllSelected] = useState<string[]>([]);
+  const selectedCount = d.elements.filter((e) =>
+    allSelected.includes(e.id),
+  ).length;
+  const [extendSelection, setExtendSelection] = useState(false);
+  const [cellSelection, setCellSelection] = useState<
+    { row: number; col: number }[]
+  >([]);
+  const [editing, setEditing] = useState<{
+    id: string;
+    row?: number;
+    col?: number;
+  }>();
+  const [fitHelp, setFitHelp] = useState(false);
+  const [deletion, setDeletion] = useState<{
+    table: Table;
+    axis: "row" | "col";
+    index: number;
+  }>();
+  const [inspectorOpen, setInspectorOpen] = useState(
+    () => window.matchMedia("(min-width: 651px)").matches,
+  );
+
+  const [drag, setDrag] = useState<PaperElement>();
+  const dragValue = useRef<PaperElement | undefined>(undefined);
+  const pointer = useRef<
+    | {
+        x: number;
+        y: number;
+        element: PaperElement;
+        mode: "move" | "resize" | "row" | "col";
+        index?: number;
+      }
+    | undefined
+  >(undefined);
+  const file = useRef<HTMLInputElement>(null);
+  const svgFile = useRef<HTMLInputElement>(null);
+  const fonts = useResource<Fonts>("/api/v1/fonts");
+  const [width, height] = pageSize(d);
+  const viewport = usePaperViewport(width, height);
+  const { stage, paper, zoom, setZoom, scale } = viewport;
+  const element = d.elements.find((e) => e.id === selected);
+  const table = element?.type === "table" ? element : undefined;
+  const chosenCells =
+    table?.cells.filter((c) =>
+      cellSelection.some((s) => s.row === c.row && s.col === c.col),
+    ) || [];
+  const activeCell = chosenCells[0];
+  const errors = m.preview?.diagnostics || [];
+  const noFonts =
+    !!fonts.data && !fonts.data.fonts.some((font) => font.available);
+  const fontError =
+    noFonts && d.elements.some((element) => element.type !== "vector");
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if (
@@ -118,6 +187,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
       const key = event.key.toLowerCase();
       if (key !== "z" && key !== "y") return;
       const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(".editor-defaults")) return;
       if (
         target?.closest('input,textarea,select,[contenteditable="true"]') &&
         !root.current?.contains(target) &&
@@ -133,12 +203,6 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
     document.addEventListener("keydown", shortcut, true);
     return () => document.removeEventListener("keydown", shortcut, true);
   }, [m]);
-  const d = m.document;
-  const [selected, setSelected] = useState<string>();
-  const [allSelected, setAllSelected] = useState<string[]>([]);
-  const selectedCount = d.elements.filter((e) =>
-    allSelected.includes(e.id),
-  ).length;
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -189,53 +253,8 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
     document.addEventListener("keydown", shortcut, true);
     return () => document.removeEventListener("keydown", shortcut, true);
   }, [m, selected, allSelected]);
-  const [extendSelection, setExtendSelection] = useState(false);
-  const [cellSelection, setCellSelection] = useState<
-    { row: number; col: number }[]
-  >([]);
-  const [editing, setEditing] = useState<{
-    id: string;
-    row?: number;
-    col?: number;
-  }>();
-  const [fitHelp, setFitHelp] = useState(false);
-  const [discard, setDiscard] = useState<"new" | "open">();
-  const [deletion, setDeletion] = useState<{
-    table: Table;
-    axis: "row" | "col";
-    index: number;
-  }>();
-  const [inspectorOpen, setInspectorOpen] = useState(
-    () => window.matchMedia("(min-width: 651px)").matches,
-  );
-
-  const [drag, setDrag] = useState<PaperElement>();
-  const dragValue = useRef<PaperElement | undefined>(undefined);
-  const pointer = useRef<
-    | {
-        x: number;
-        y: number;
-        element: PaperElement;
-        mode: "move" | "resize" | "row" | "col";
-        index?: number;
-      }
-    | undefined
-  >(undefined);
-  const file = useRef<HTMLInputElement>(null);
-  const svgFile = useRef<HTMLInputElement>(null);
-  const fonts = useResource<Fonts>("/api/fonts");
-  const [width, height] = pageSize(d);
-  const viewport = usePaperViewport(width, height);
-  const { stage, paper, zoom, setZoom, scale } = viewport;
-  const element = d.elements.find((e) => e.id === selected);
-  const table = element?.type === "table" ? element : undefined;
-  const chosenCells =
-    table?.cells.filter((c) =>
-      cellSelection.some((s) => s.row === c.row && s.col === c.col),
-    ) || [];
-  const activeCell = chosenCells[0];
-  const errors = m.preview?.diagnostics || [];
   function select(id?: string) {
+    setPenSelected(false);
     m.endEdit();
     m.setComposing(false);
     setSelected(id);
@@ -246,6 +265,11 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
     setCellSelection([]);
     setEditing(undefined);
   }
+  function selectPen() {
+    select();
+    setPenSelected(true);
+    if (window.matchMedia("(min-width: 651px)").matches) setInspectorOpen(true);
+  }
   function safe(action: () => void) {
     try {
       action();
@@ -255,14 +279,9 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
   }
   function request(action: "new" | "open") {
     if (m.locked) return;
-    if (m.dirty && (d.elements.length || d.name !== "未命名文档"))
-      setDiscard(action);
-    else perform(action);
-  }
-  function perform(action: "new" | "open") {
     select();
-    if (action === "new") m.newDocument();
-    else file.current?.click();
+    if (action === "new") void m.newDocument();
+    else onOpenLibrary();
   }
   function patch(changes: Partial<PaperElement>) {
     if (element) m.replaceElement({ ...element, ...changes } as PaperElement);
@@ -334,23 +353,14 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
     if (p.mode === "move")
       next = {
         ...el,
-        x_mm: Math.max(
-          d.margin_mm,
-          Math.min(width - d.margin_mm - el.width_mm, el.x_mm + dx),
-        ),
-        y_mm: Math.max(
-          d.margin_mm,
-          Math.min(height - d.margin_mm - el.height_mm, el.y_mm + dy),
-        ),
+        x_mm: el.x_mm + dx,
+        y_mm: el.y_mm + dy,
       };
     else if (p.mode === "resize")
       next = resizeElement(
         el,
-        Math.max(3, Math.min(width - d.margin_mm - el.x_mm, el.width_mm + dx)),
-        Math.max(
-          3,
-          Math.min(height - d.margin_mm - el.y_mm, el.height_mm + dy),
-        ),
+        Math.max(3, el.width_mm + dx),
+        Math.max(3, el.height_mm + dy),
       );
     else if (el.type === "table") {
       const key = p.mode === "row" ? "row_heights" : "column_widths",
@@ -363,21 +373,6 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
       sizes[i] += delta;
       sizes[i + 1] -= delta;
       next = { ...el, [key]: sizes };
-    }
-    if (p.mode === "resize" && next.type === "vector" && next.lock_aspect) {
-      const fit = Math.max(
-        0.001 / Math.min(next.width_mm, next.height_mm),
-        Math.min(
-          1,
-          (width - d.margin_mm - next.x_mm) / next.width_mm,
-          (height - d.margin_mm - next.y_mm) / next.height_mm,
-        ),
-      );
-      next = {
-        ...next,
-        width_mm: next.width_mm * fit,
-        height_mm: next.height_mm * fit,
-      };
     }
     dragValue.current = next;
     setDrag(next);
@@ -437,24 +432,28 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
     sizes[other] = total - value;
     m.replaceElement({ ...table, [key]: sizes });
   }
-  const feedback = m.error
-    ? "预览失败：" + m.error + (m.previewUrl ? "；当前显示上次成功预览" : "")
-    : !d.elements.length
-      ? "添加文本框、表格或导入 SVG，开始编排纸面"
-      : !m.preview
-        ? m.previewUrl
-          ? "正在更新笔画预览…"
-          : "正在生成笔画预览…"
-        : errors.length
-          ? errors
-              .map((v) => v.message)
-              .filter((v, i, a) => a.indexOf(v) === i)
-              .join("；")
-          : !m.preview.can_print
-            ? "没有可绘制的内容"
-            : busy
-              ? "当前纸面与机器参数已冻结"
-              : "✓ 内容位于可书写区域内";
+  const feedback = fontError
+    ? "未找到书写字库，无法生成笔画或开始书写。请安装字体数据集或检查字体目录配置后刷新。"
+    : m.error
+      ? "预览失败：" + m.error + (m.previewUrl ? "；当前显示上次成功预览" : "")
+      : !d.elements.length
+        ? "添加文本框、表格或导入 SVG，开始编排纸面"
+        : !m.preview
+          ? m.previewUrl
+            ? "正在更新笔画预览…"
+            : "正在生成笔画预览…"
+          : errors.length
+            ? errors
+                .map((v) => v.message)
+                .filter((v, i, a) => a.indexOf(v) === i)
+                .join("；")
+            : !m.preview.can_print
+              ? "没有可绘制的内容"
+              : busy
+                ? "已提交任务独立执行，可继续编排"
+                : d.pen_anchor
+                  ? "✓ 内容校核通过 · 将按实际笔头位置定位"
+                  : "✓ 内容校核通过 · 纸张仅作参考";
   return (
     <div
       ref={root}
@@ -463,6 +462,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         const target = event.target;
         if (
           target instanceof HTMLInputElement &&
+          !target.closest(".editor-defaults") &&
           (target.type === "text" || target.type === "number")
         )
           m.beginEdit(target.getAttribute("aria-label") || target.name);
@@ -471,6 +471,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         const target = event.target;
         if (
           target instanceof HTMLInputElement &&
+          !target.closest(".editor-defaults") &&
           (target.type === "text" || target.type === "number")
         )
           m.endEdit(target.getAttribute("aria-label") || target.name);
@@ -495,10 +496,10 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
               {Object.keys(m.inputErrors).length
                 ? "有尚未生效的数值，请修正后保存或书写"
                 : m.saveError
-                  ? "自动保存失败，内容暂留本页"
+                  ? "服务端保存失败"
                   : m.locallySaved
-                    ? "已自动保存"
-                    : "尚未自动保存"}
+                    ? "已保存到服务端"
+                    : "正在同步服务端"}
               {m.saveError && (
                 <Button kind="ghost" onClick={m.retrySave}>
                   重试保存
@@ -531,11 +532,42 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           </div>,
           documentHost,
         )}
+      {m.saveError && (
+        <div className="document-sync-error" role="alert">
+          <span>{m.saveError}</span>
+          <Button
+            onClick={() =>
+              void m.server
+                .create(m.document, true)
+                .catch((error) => m.notify(error.message, true))
+            }
+          >
+            另存为新文档
+          </Button>
+          {m.server.conflict && (
+            <Button
+              onClick={() =>
+                void m.server
+                  .reload()
+                  .catch((error) => m.notify(error.message, true))
+              }
+            >
+              读取服务端版本（替换本页）
+            </Button>
+          )}
+        </div>
+      )}
       <div className="canvas-tools" role="toolbar" aria-label="纸面工具">
+        <span className="tool-group-label">插入</span>
         <Button
-          disabled={m.locked || d.elements.length >= 100}
+          disabled={
+            m.locked ||
+            !m.defaults.data ||
+            m.defaults.saving ||
+            d.elements.length >= 100
+          }
           onClick={() => {
-            const e = newText(d);
+            const e = newText(d, "", m.defaults.data!.font_size_mm);
             m.change("elements", [...d.elements, e]);
             select(e.id);
             setEditing({ id: e.id });
@@ -544,9 +576,14 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           添加文本框
         </Button>
         <Button
-          disabled={m.locked || d.elements.length >= 100}
+          disabled={
+            m.locked ||
+            !m.defaults.data ||
+            m.defaults.saving ||
+            d.elements.length >= 100
+          }
           onClick={() => {
-            const e = newTable(d);
+            const e = newTable(d, m.defaults.data!.font_size_mm);
             m.change("elements", [...d.elements, e]);
             select(e.id);
           }}
@@ -574,6 +611,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         >
           {m.importing ? "导入中…" : "导入 SVG"}
         </Button>
+        <span className="tool-group-label edit-group-label">编辑</span>
         <Button
           kind="ghost"
           className="selection-tool"
@@ -582,6 +620,19 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           onClick={() => viewport.setHand(false)}
         >
           选择
+        </Button>
+        <Button
+          kind="ghost"
+          aria-pressed={!!d.pen_anchor}
+          disabled={m.locked}
+          onClick={() => {
+            viewport.setHand(false);
+            if (!d.pen_anchor)
+              m.change("pen_anchor", { x_mm: d.margin_mm, y_mm: d.margin_mm });
+            selectPen();
+          }}
+        >
+          笔头定位
         </Button>
         <Button
           kind="ghost"
@@ -611,8 +662,11 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         >
           重做
         </Button>
+        <span className="tool-group-label view-group-label">视图</span>
         <span className="paper-size-label muted">
-          {d.paper} · {width} × {height} mm
+          {d.paper} · 纵向
+          <br />
+          {width} × {height} mm
         </span>
         <label className="canvas-zoom">
           <select
@@ -641,6 +695,33 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         >
           属性
         </Button>
+        <Button
+          kind="ghost"
+          onClick={() => {
+            setInspectorOpen(true);
+            requestAnimationFrame(() => {
+              const defaults =
+                root.current?.querySelector<HTMLDetailsElement>(
+                  ".editor-defaults",
+                );
+              if (defaults) {
+                defaults.open = true;
+                defaults.scrollIntoView({ block: "nearest" });
+                defaults.querySelector<HTMLInputElement>("input")?.focus();
+              }
+            });
+          }}
+        >
+          默认字号
+        </Button>
+        <div className="paper-coordinate-readout" aria-label="纸面坐标">
+          {viewport.cursor
+            ? `${viewport.cursor.x.toFixed(2)}, ${viewport.cursor.y.toFixed(2)} mm`
+            : "0, 0 mm"}
+          <Button kind="ghost" aria-label="快捷键与帮助" onClick={onHelp}>
+            帮助
+          </Button>
+        </div>
       </div>
       <div
         className={"canvas-columns " + (inspectorOpen ? "inspector-open" : "")}
@@ -662,8 +743,6 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
         >
           <div className="paper-viewport">
             <PaperRulers
-              width={width}
-              height={height}
               scale={scale}
               view={viewport.view}
               cursor={viewport.cursor}
@@ -701,13 +780,38 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                     src={m.previewUrl}
                     alt="纸面真实笔画预览"
                     draggable={false}
-                  />
-                ) : (
-                  <div
-                    className="empty-margin-guide"
                     style={{
-                      inset: `${(100 * d.margin_mm) / height}% ${(100 * d.margin_mm) / width}%`,
+                      left: inkBounds.left * scale,
+                      top: inkBounds.top * scale,
+                      width: inkBounds.width * scale,
+                      height: inkBounds.height * scale,
                     }}
+                  />
+                ) : null}
+                {m.previewUrl && (
+                  <div
+                    aria-hidden="true"
+                    className="outside-paper-ink"
+                    style={{
+                      left: inkBounds.left * scale,
+                      top: inkBounds.top * scale,
+                      width: inkBounds.width * scale,
+                      height: inkBounds.height * scale,
+                      maskImage: `url(${m.previewUrl})`,
+                      clipPath: `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${-inkBounds.left * scale}px ${-inkBounds.top * scale}px, ${-inkBounds.left * scale}px ${(height - inkBounds.top) * scale}px, ${(width - inkBounds.left) * scale}px ${(height - inkBounds.top) * scale}px, ${(width - inkBounds.left) * scale}px ${-inkBounds.top * scale}px, ${-inkBounds.left * scale}px ${-inkBounds.top * scale}px)`,
+                    }}
+                  />
+                )}
+                {d.pen_anchor && (
+                  <PenAnchorMarker
+                    anchor={d.pen_anchor}
+                    width={width}
+                    height={height}
+                    scale={scale}
+                    selected={penSelected}
+                    locked={m.locked}
+                    select={selectPen}
+                    change={(point) => m.change("pen_anchor", point)}
                   />
                 )}
                 {d.elements.map((original) => {
@@ -988,24 +1092,14 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
               </div>
             </div>
           </div>
-          <div
-            className={
-              "inline-preview-status " +
-              (m.error || errors.length ? "invalid" : "")
-            }
-            role={m.error || errors.length ? "alert" : "status"}
-          >
-            <p>{feedback}</p>
-            <div className="paper-coordinate-readout" aria-label="纸面坐标">
-              {viewport.cursor
-                ? `${viewport.cursor.x.toFixed(2)}, ${viewport.cursor.y.toFixed(2)} mm`
-                : "0, 0 mm"}
-              <Help label="纸面编辑帮助">
-                纸张左上角为 0, 0。Ctrl / ⌘ + 滚轮缩放纸张，H 小手平移，Esc
-                选择。单击输入；Shift 点击选择多个单元格；虚线和选择框不落笔。
-              </Help>
+          {!inspectorOpen && (
+            <div
+              className="inline-preview-status"
+              role={fontError || m.error || errors.length ? "alert" : "status"}
+            >
+              <p>{feedback}</p>
             </div>
-          </div>
+          )}
         </section>
         <aside
           id="paper-inspector"
@@ -1023,11 +1117,13 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           <div className="inspector-content">
             <div className="inspector-identity">
               <h2>
-                {selectedCount
-                  ? `已选 ${selectedCount} 个元素`
-                  : element
-                    ? elementName(element)
-                    : "纸面设置"}
+                {penSelected && d.pen_anchor
+                  ? "笔头定位"
+                  : selectedCount
+                    ? `已选 ${selectedCount} 个元素`
+                    : element
+                      ? elementName(element)
+                      : "纸面设置"}
               </h2>
               {selectedCount > 0 && (
                 <p className="muted" role="status">
@@ -1067,6 +1163,53 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                 />
               </fieldset>
             </details>
+            <DefaultFontSize
+              defaults={m.defaults}
+              expanded={!element && !penSelected}
+            />
+            {penSelected && d.pen_anchor && (
+              <fieldset key={`pen:${m.inputEpoch}`} disabled={m.locked}>
+                <div className="property-heading">
+                  <h3>笔头对应点</h3>
+                  <span>纸面坐标</span>
+                </div>
+                <p className="muted">
+                  实际笔头保持不动。将标志放到内容中与笔头对应的位置，整份内容按此对位。
+                </p>
+                <div className="dimension-grid">
+                  <NumberField
+                    label="笔头 X"
+                    value={d.pen_anchor.x_mm}
+                    min={-Infinity}
+                    max={Infinity}
+                    change={(value) =>
+                      m.change("pen_anchor", { ...d.pen_anchor!, x_mm: value })
+                    }
+                  />
+                  <NumberField
+                    label="笔头 Y"
+                    value={d.pen_anchor.y_mm}
+                    min={-Infinity}
+                    max={Infinity}
+                    change={(value) =>
+                      m.change("pen_anchor", { ...d.pen_anchor!, y_mm: value })
+                    }
+                  />
+                </div>
+                <p className="muted">
+                  拖动或输入坐标只修改定位。点击“开始书写”时读取实际笔头位置；抬笔收尾后回到该位置。
+                </p>
+                <Button
+                  kind="ghost"
+                  onClick={() => {
+                    m.change("pen_anchor", null);
+                    select();
+                  }}
+                >
+                  取消笔头定位
+                </Button>
+              </fieldset>
+            )}
             {element ? (
               <>
                 <fieldset
@@ -1098,22 +1241,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                           }[key]
                         }
                         value={element[key]}
-                        max={
-                          element.type === "vector" && element.lock_aspect
-                            ? key === "width_mm"
-                              ? Math.min(
-                                  297,
-                                  (297 * element.width_mm) / element.height_mm,
-                                )
-                              : key === "height_mm"
-                                ? Math.min(
-                                    297,
-                                    (297 * element.height_mm) /
-                                      element.width_mm,
-                                  )
-                                : 297
-                            : 297
-                        }
+                        max={Infinity}
                         min={
                           key === "width_mm" || key === "height_mm"
                             ? element.type === "vector"
@@ -1127,7 +1255,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                                     )
                                   : 1)
                               : 0.5
-                            : 0
+                            : -Infinity
                         }
                         change={(v) =>
                           key === "width_mm" || key === "height_mm"
@@ -1230,7 +1358,7 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                     <>
                       <div className="property-heading">
                         <h3>文字</h3>
-                        <span>整{table ? "表" : "框"}</span>
+                        <span>{table ? "当前表格" : "当前文本框"}</span>
                       </div>
                       <label className="compact-field font-field">
                         <span className="sr-only">字体</span>
@@ -1239,7 +1367,9 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                           value={element.font}
                           onChange={(e) => patch({ font: e.target.value })}
                         >
-                          <option value="">数据集默认字体</option>
+                          <option value="">
+                            {noFonts ? "未找到书写字库" : "数据集默认字体"}
+                          </option>
                           {fonts.data?.fonts.map((f) => (
                             <option
                               key={f.id}
@@ -1259,6 +1389,14 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                           </small>
                         )}
                       </label>
+                      {noFonts && (
+                        <p role="alert">
+                          未找到书写字库，无法生成笔画或开始书写。请安装字体数据集或检查字体目录配置。
+                          <Button kind="ghost" onClick={fonts.reload}>
+                            刷新字体列表
+                          </Button>
+                        </p>
+                      )}
                       <div className="dimension-grid font-fields">
                         {(
                           [
@@ -1539,21 +1677,32 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
                   </div>
                 </fieldset>
               </>
-            ) : (
+            ) : penSelected && d.pen_anchor ? null : (
               <p className="muted inspector-empty">
                 选择纸面上的文本框、表格或矢量图，调整位置和尺寸。
               </p>
             )}
           </div>
           <div className="inspector-preview">
-            <span className="muted">
+            <span className="muted" title={estimateHelp}>
               {m.error
                 ? "预览失败"
                 : !m.preview
                   ? "正在更新预览"
-                  : "预览已最新"}
+                  : m.preview.estimated_duration_seconds != null
+                    ? `预计用时约 ${formatDuration(m.preview.estimated_duration_seconds)}`
+                    : "预览已最新"}
             </span>
             <Button onClick={m.reload}>重新预览</Button>
+          </div>
+          <div
+            className={
+              "inline-preview-status " +
+              (fontError || m.error || errors.length ? "invalid" : "")
+            }
+            role={fontError || m.error || errors.length ? "alert" : "status"}
+          >
+            <p>{feedback}</p>
           </div>
         </aside>
       </div>
@@ -1572,16 +1721,6 @@ function WorkbenchContent({ model: m, documentHost, busy }: WorkbenchProps) {
           e.target.value = "";
         }}
       />
-      {discard && (
-        <Dialog
-          title={discard === "new" ? "新建空白文档？" : "打开其他文档？"}
-          confirmLabel={discard === "new" ? "继续新建" : "继续打开"}
-          close={() => setDiscard(undefined)}
-          confirm={async () => perform(discard)}
-        >
-          当前文档尚未导出文件。继续操作将替换本机草稿，请先保存文件以保留副本。
-        </Dialog>
-      )}
       {deletion && (
         <Dialog
           title="删除含文字的行列？"

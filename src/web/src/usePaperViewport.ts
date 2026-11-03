@@ -216,9 +216,7 @@ export function usePaperViewport(width: number, height: number) {
       if (clientPoint.current) {
         const x = (clientPoint.current.x - rect.left) / scale,
           y = (clientPoint.current.y - rect.top) / scale;
-        setCursor(
-          x >= 0 && y >= 0 && x <= width && y <= height ? { x, y } : undefined,
-        );
+        setCursor({ x, y });
       }
       setView({
         x: rect.left - viewport.left,
@@ -248,9 +246,7 @@ export function usePaperViewport(width: number, height: number) {
     if (!rect) return;
     const x = (clientX - rect.left) / scale,
       y = (clientY - rect.top) / scale;
-    setCursor(
-      x >= 0 && y >= 0 && x <= width && y <= height ? { x, y } : undefined,
-    );
+    setCursor({ x, y });
   }
   return {
     stage,

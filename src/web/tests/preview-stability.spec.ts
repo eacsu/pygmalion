@@ -52,12 +52,12 @@ test("连续输入不清空其他单元格，慢响应完成后才替换笔迹",
   const before = await other.screenshot();
   const gate = deferred();
   const responses = new Map<string, string>();
-  await page.route("**/api/workbench/preview", async (route) => {
+  await page.route("**/api/v1/plans", async (route) => {
     const response = await route.fetch();
     const data = await response.json();
     responses.set(
       route.request().postDataJSON().elements[0].cells[0].text,
-      data.svg,
+      await (await page.request.get(data.preview_url)).text(),
     );
     await gate.promise;
     await route.fulfill({ response, json: data }).catch(() => {});
@@ -124,11 +124,17 @@ test("失败和重试保留上次笔迹，撤销重做也不会清屏或放行�
 }) => {
   const { image, url } = await setupTable(page);
   let failure: "http" | "image" | undefined = "http";
+  await page.route("**/invalid-preview.svg", (route) =>
+    route.fulfill({ contentType: "image/svg+xml", body: "invalid-svg" }),
+  );
   const gate = deferred();
   let retryReceived = false;
-  await page.route("**/api/workbench/preview", async (route) => {
+  await page.route("**/api/v1/plans", async (route) => {
     if (failure === "http") {
-      await route.fulfill({ status: 503, json: { error: "预览暂时不可用" } });
+      await route.fulfill({
+        status: 503,
+        json: { error: { code: "test_failure", message: "预览暂时不可用" } },
+      });
       return;
     }
     retryReceived = true;
@@ -138,7 +144,10 @@ test("失败和重试保留上次笔迹，撤销重做也不会清屏或放行�
       await route
         .fulfill({
           response,
-          json: { ...(await response.json()), svg: "invalid-svg" },
+          json: {
+            ...(await response.json()),
+            preview_url: "/invalid-preview.svg",
+          },
         })
         .catch(() => {});
     } else await route.fulfill({ response }).catch(() => {});
@@ -284,7 +293,6 @@ test("图片解码前保留旧图，过期解码不能覆盖新图，URL及时�
     )
     .toBe(1);
   await page.getByRole("button", { name: "新建", exact: true }).click();
-  await page.getByRole("button", { name: "继续新建", exact: true }).click();
   await expect(image).toHaveCount(0);
   await expect
     .poll(() =>
@@ -300,7 +308,7 @@ test("布局、打开文件及清空文档不会沿用不兼容的旧图", async
   const { image, url } = await setupTable(page);
   let gate = deferred();
   let requests = 0;
-  await page.route("**/api/workbench/preview", async (route) => {
+  await page.route("**/api/v1/plans", async (route) => {
     const wait = gate.promise;
     const response = await route.fetch();
     requests++;

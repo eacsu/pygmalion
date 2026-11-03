@@ -9,7 +9,7 @@
   color-scheme: light;
   --background: #f8f7f2;
   --sidebar: #f3f1ea;
-  --surface-subtle: #eeece5;
+  --surface-subtle: #f8f7f2;
   --border-strong: #c7cdc8;
   --editor-interaction: #607d99;
   --header: var(--background);
@@ -27,7 +27,7 @@
   --accent: #afc2bc;
   --primary-bg: #252a2a;
   --primary-text: #f8f7f2;
-  --paper-bg: #f8f7f2;
+  --paper-bg: #fcfbf8;
   --paper-ink: #252a2a;
   --paper-line: #d8dcd7;
   --sidebar-width: 52px;

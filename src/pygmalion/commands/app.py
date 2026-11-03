@@ -35,6 +35,10 @@ def serve(
             envvar="PYGMALION_DRY_RUN", help="演练书写任务；手动控制仍操作真实设备"
         ),
     ] = False,
+    api_only: Annotated[
+        bool,
+        typer.Option(envvar="PYGMALION_API_ONLY", help="只启动 API，不要求前端构建"),
+    ] = False,
     fonts_dir: Annotated[
         Path | None,
         typer.Option(
@@ -50,13 +54,20 @@ def serve(
     """启动 Web 工作区。"""
     import uvicorn
 
+    os.environ["PYGMALION_API_ONLY"] = "1" if api_only else "0"
     os.environ["PYGMALION_DRY_RUN"] = "1" if dry_run else "0"
     os.environ["PYGMALION_PORT"] = str(port)
     if data_home is not None:
         os.environ["PYGMALION_HOME"] = str(data_home.resolve())
     if fonts_dir is not None:
         os.environ["PYGMALION_FONTS_DIR"] = str(fonts_dir)
-    logger.info("工作区：http://%s:%s/admin", host, port)
+    logger.info(
+        "%s：http://%s:%s%s",
+        "API" if api_only else "工作区",
+        host,
+        port,
+        "/docs" if api_only else "/",
+    )
     uvicorn.run("pygmalion.api.app:app", host=host, port=port)
 
 
@@ -81,6 +92,23 @@ def build_font(
         report["base_chars"],
         report["added_chars"],
         report["total_chars"],
+    )
+
+
+@app.command()
+def export_openapi(output: Annotated[Path, typer.Option(help="OpenAPI JSON 输出文件")]):
+    """离线导出公开契约，不初始化设备或数据库。"""
+    import json
+
+    from ..api.app import create_app
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(
+            create_app(serve_frontend=False).openapi(), ensure_ascii=False, indent=2
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
 

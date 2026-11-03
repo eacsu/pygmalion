@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import math
+
 from ..writing.models import PageConfig, Stroke
 from .coordinates import MachineConfig, PageToMachine
 
@@ -64,6 +66,7 @@ def strokes_to_gcode(
     machine: MachineConfig,
     optimize_order: bool = False,
     precision: int = 3,
+    return_position: tuple[float, float] = (0.0, 0.0),
 ) -> list[str]:
     """
     把笔画列表转成 G-code 行。
@@ -121,7 +124,7 @@ def strokes_to_gcode(
 
     lines += [
         f"G0 Z{f(machine.z_off)}",
-        "G0 X0 Y0",
+        f"G0 X{f(return_position[0])} Y{f(return_position[1])}",
         "M2",
     ]
     return lines

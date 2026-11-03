@@ -76,7 +76,15 @@ test("纸面编辑：文本框、拖放、缩放、撤销重做、保存和演�
   expect(
     await page.evaluate(() => localStorage.getItem("pygmalion-document-v2")),
   ).toBe(frozenDraft);
-  await page.getByRole("button", { name: "中止", exact: true }).click();
+  await expect(
+    page
+      .locator(".header")
+      .getByRole("button", { name: "停止书写", exact: true }),
+  ).toBeEnabled();
+  await page
+    .locator(".header")
+    .getByRole("button", { name: "停止书写", exact: true })
+    .click();
   await page.getByRole("button", { name: "确认中止" }).click();
   await expect(page.getByRole("button", { name: "添加表格" })).toBeEnabled();
   const saved = await exportDocument(page);
@@ -143,7 +151,9 @@ test("表格：直接编辑、合并拆分、行列操作、固定外框自适�
   await expect(page.getByRole("gridcell")).toHaveCount(9);
 });
 
-test("缺字、越界、内容溢出及预览失败阻止执行，支持重试", async ({ page }) => {
+test("缺字、内容溢出及预览失败阻止执行，跨纸边不再产生边界错误", async ({
+  page,
+}) => {
   await page.goto("/");
   await editText(page, "甲\u{10ffff}");
   await expect(page.locator(".inline-preview-status")).toContainText("缺字");
@@ -156,16 +166,19 @@ test("缺字、越界、内容溢出及预览失败阻止执行，支持重试",
   );
   await page.getByLabel("横向位置", { exact: true }).fill("100");
   await expect(page.locator(".inline-preview-status")).toContainText(
-    "超出纸面",
+    "文本框内容溢出",
   );
-  await page.route("**/api/workbench/preview", (route) =>
-    route.fulfill({ status: 503, json: { error: "测试预览不可用" } }),
+  await page.route("**/api/v1/plans", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: { code: "test_failure", message: "测试预览不可用" } },
+    }),
   );
   await page.getByLabel("横向位置", { exact: true }).fill("20");
   await expect(page.locator(".inline-preview-status")).toContainText(
     "测试预览不可用",
   );
-  await page.unroute("**/api/workbench/preview");
+  await page.unroute("**/api/v1/plans");
   await page.getByRole("button", { name: "重新预览", exact: true }).click();
   await expect(page.locator(".inline-preview-status")).toContainText(
     "文本框内容溢出",
@@ -174,6 +187,9 @@ test("缺字、越界、内容溢出及预览失败阻止执行，支持重试",
 
 test("旧文档迁移横排及键盘编辑和合并", async ({ page }) => {
   await page.goto("/");
+  await expect(page.locator(".document-save-status")).toContainText(
+    "已保存到服务端",
+  );
   const old = {
     name: "旧文档",
     body: "甲乙",
@@ -260,7 +276,7 @@ test("自适应旧响应不覆盖编辑，失败时保留原表格", async ({ pa
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/workbench/table-fit", async (route) => {
+  await page.route("**/api/v1/documents/fit-table", async (route) => {
     const response = await route.fetch();
     await gate;
     await route.fulfill({ response });
@@ -273,7 +289,7 @@ test("自适应旧响应不覆盖编辑，失败时保留原表格", async ({ pa
   release();
   await expect(page.getByText("文档已变化，请重新自适应")).toBeVisible();
   await expect(page.getByLabel("字号", { exact: true })).toHaveValue("7");
-  await page.unroute("**/api/workbench/table-fit");
+  await page.unroute("**/api/v1/documents/fit-table");
   await editCell(page, 1, 1, "甲".repeat(2000));
   const before = await exportDocument(page);
   await page.getByRole("button", { name: "自适应", exact: true }).click();

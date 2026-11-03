@@ -162,7 +162,7 @@ def test_lifespan_cleans_up_after_start_or_failure(tmp_path, monkeypatch, fail_s
 
     class Context:
         def __init__(self, *, dry_run):
-            self.printer = type("Printer", (), {"dry_run": dry_run})()
+            self.execution = type("Execution", (), {"dry_run": dry_run})()
             events.append("create")
 
         def start(self):
@@ -182,7 +182,7 @@ def test_lifespan_cleans_up_after_start_or_failure(tmp_path, monkeypatch, fail_s
             pass
     else:
         with TestClient(application.create_app(tmp_path, dry_run=True)) as client:
-            assert client.get("/api/health").json() == {"status": "ok"}
+            assert client.get("/api/v1/health").json() == {"status": "ok"}
     assert events == ["create", "start", "stop"]
 
 
@@ -193,7 +193,7 @@ def test_context_cleans_controller_when_worker_stop_fails(monkeypatch):
     def fail_stop():
         raise RuntimeError("worker cleanup failed")
 
-    monkeypatch.setattr(context.printer, "stop", fail_stop)
+    monkeypatch.setattr(context.execution, "stop", fail_stop)
     monkeypatch.setattr(
         context.machine, "stop", lambda: events.append("machine stopped")
     )
@@ -203,23 +203,26 @@ def test_context_cleans_controller_when_worker_stop_fails(monkeypatch):
 
 
 def test_manual_session_token_cannot_be_bypassed(client):
-    from pygmalion.servicer import machine
-    from pygmalion.servicer.errors import ServiceError
+    from pygmalion.machine.errors import MachineError
 
     context = client.app.state.services
-    session = machine.begin_session(context)
+    session = context.machine.begin_session()
     assert session is not None
     try:
         for token in (None, object()):
-            with pytest.raises(ServiceError) as error:
-                machine.jog(context, {"action": "x", "dist": 1}, session=token)
+            with pytest.raises(MachineError) as error:
+                context.machine.jog({"action": "x", "dist": 1}, session=token)
             assert error.value.kind == "busy"
         assert (
-            client.post("/api/admin/jog", json={"action": "x", "dist": 1}).status_code
+            client.post(
+                "/api/v1/machine/commands",
+                json={"type": "jog", "axis": "x", "distance_mm": 1},
+                headers={"Idempotency-Key": "no-token"},
+            ).status_code
             == 409
         )
     finally:
-        machine.end_session(context, session)
+        context.machine.end_session(session)
     assert not context.machine.manual_control_lock.locked()
 
 
@@ -247,4 +250,4 @@ def test_worker_start_failure_can_be_cleaned_up(isolated_runtime, monkeypatch):
     with pytest.raises(RuntimeError, match="thread start failed"):
         context.start()
     context.stop()
-    assert context.printer._thread is None
+    assert context.execution.threads == []

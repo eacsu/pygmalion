@@ -7,15 +7,21 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Model(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, strict=True)
+
+
+class EditorDefaults(Model):
+    """新建元素的应用默认值，不参与已有文档的渲染。"""
+
+    font_size_mm: float = Field(default=8, ge=4, le=40)
 
 
 class Element(Model):
     id: str = Field(min_length=1, max_length=120)
     x_mm: float = 20
     y_mm: float = 20
-    width_mm: float = Field(default=100, gt=0, le=297)
-    height_mm: float = Field(default=50, gt=0, le=297)
+    width_mm: float = Field(default=100, gt=0)
+    height_mm: float = Field(default=50, gt=0)
 
 
 class TextElement(Element):
@@ -120,12 +126,20 @@ class SvgImportRequest(Model):
 CanvasElement = Annotated[TextBox | Table | Vector, Field(discriminator="type")]
 
 
+class PenAnchor(Model):
+    """纸面上与书写开始时实际笔头对应的点，单位毫米。"""
+
+    x_mm: float
+    y_mm: float
+
+
 class CanvasDocument(Model):
     version: Literal[2] = 2
     name: str = Field(default="未命名文档", max_length=120)
     paper: Literal["A4", "A5"] = "A4"
     margin_mm: float = Field(default=20, ge=0, le=60)
     elements: list[CanvasElement] = Field(default_factory=list, max_length=100)
+    pen_anchor: PenAnchor | None = None
 
     @model_validator(mode="after")
     def valid_document(self):

@@ -1,4 +1,11 @@
-import { mkdir, copyFile, readdir, access, rm } from "node:fs/promises";
+import {
+  mkdir,
+  copyFile,
+  readdir,
+  access,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -17,6 +24,11 @@ async function findFont(directory: string): Promise<string | undefined> {
   }
 }
 export default async function prepareRuntime() {
+  await mkdir(path.resolve("../../.cache/e2e"), { recursive: true });
+  await writeFile(
+    path.resolve("../../.cache/e2e/config.json"),
+    JSON.stringify({ machine: { port: "COM99" }, editor: { font_size_mm: 8 } }),
+  );
   const expanded = path.resolve(
     "../../model-bin/cjk-medians-plus/train.parquet",
   );

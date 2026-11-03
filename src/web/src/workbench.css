@@ -163,7 +163,7 @@
   border-color: var(--line);
 }
 .document-save-status {
-  width: 76px;
+  width: 96px;
   font-size: 12px;
   line-height: 18px;
   white-space: nowrap;
@@ -991,6 +991,7 @@ select option {
   position: relative;
 }
 .canvas-paper {
+  color-scheme: light;
   margin: 0 auto;
   overflow: visible;
   box-sizing: content-box;
@@ -1013,6 +1014,27 @@ select option {
   outline: 1px solid var(--paper-ink);
   z-index: 2;
 }
+.pen-anchor-marker {
+  position: absolute;
+  z-index: 8;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--paper-ink);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  touch-action: none;
+}
+.pen-anchor-marker.selected svg {
+  stroke-width: 2;
+}
+.pen-anchor-marker:active {
+  cursor: grabbing;
+}
+
 .paper-element.element-invalid {
   outline: 1px solid var(--danger);
 }
@@ -1520,4 +1542,385 @@ select option {
   min-height: 12px;
   transform: translate(-50%, -50%);
   cursor: default;
+}
+
+/* 主页面以 Figma 8:1071 / 8:3344 为准：纵向工具、通高纸面。 */
+.task-bar[hidden] {
+  display: none;
+}
+.tool-group-label {
+  display: none;
+}
+.canvas-tools > .paper-coordinate-readout {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+@media (min-width: 1001px) {
+  .console-v1 .header {
+    height: 44px;
+    flex-basis: 44px;
+  }
+  .single-page-workbench {
+    display: grid;
+    grid-template-columns: 144px minmax(0, 1fr) 304px;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .single-page-workbench:has(.canvas-columns:not(.inspector-open)) {
+    grid-template-columns: 144px minmax(0, 1fr);
+  }
+  .canvas-tools {
+    grid-column: 1;
+    grid-row: 1;
+    flex-direction: column;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    gap: 3px;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 18px 12px 0;
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .canvas-tools > .button {
+    flex-shrink: 0;
+    justify-content: flex-start;
+    padding-inline: 8px;
+    min-height: 32px;
+  }
+  .tool-group-label {
+    display: block;
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--muted);
+  }
+  .edit-group-label {
+    border-top: 1px solid var(--line);
+    margin-top: 3px;
+  }
+  .view-group-label {
+    margin-top: auto;
+    padding-top: 16px;
+  }
+  .paper-size-label,
+  .canvas-zoom {
+    margin-left: 0;
+    font-size: 11px;
+  }
+  .canvas-zoom select {
+    width: 100%;
+  }
+  .canvas-tools > .paper-coordinate-readout {
+    margin: 0 -12px;
+    padding: 8px;
+    border-top: 1px solid var(--line);
+    min-height: 36px;
+    justify-content: space-between;
+    font-size: 10px;
+    gap: 2px;
+    white-space: nowrap;
+  }
+  .canvas-columns {
+    display: contents;
+  }
+  .page-preview {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .canvas-inspector {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .inspector-identity {
+    position: sticky;
+    top: -6px;
+    z-index: 2;
+    background: var(--surface);
+    padding-block: 8px;
+  }
+  .canvas-inspector > .inline-preview-status {
+    min-height: 30px;
+    font-size: 12px;
+    line-height: 18px;
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* 纸张是参考背景，编辑与真实笔画可跨越纸边。 */
+.canvas-paper,
+.canvas-paper.invalid {
+  outline: none;
+}
+.canvas-paper > img {
+  max-width: none;
+  max-height: none;
+  inset: auto;
+}
+
+/* Figma 203:27385：顶栏菜单取代常驻应用导航。 */
+.console-v1,
+.console-v1.nav-expanded {
+  grid-template-columns: minmax(0, 1fr);
+}
+.console-v1 .breadcrumb {
+  width: 128px;
+}
+.document-host {
+  width: 392px;
+}
+.main-menu-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: var(--radius);
+}
+:root[data-theme="abyssus"] .main-menu-toggle img {
+  filter: invert(1);
+}
+.app-menu {
+  position: fixed;
+  left: 16px;
+  top: 44px;
+  width: 200px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+}
+.app-menu > strong {
+  font-size: 16px;
+  line-height: 28px;
+}
+.app-menu > a,
+.app-menu > .button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 32px;
+}
+@media (min-width: 1001px) {
+  .single-page-workbench {
+    grid-template-columns: 112px minmax(0, 1fr) 304px;
+  }
+  .single-page-workbench:has(.canvas-columns:not(.inspector-open)) {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+  .canvas-tools {
+    padding: 16px 8px 0;
+    gap: 4px;
+    border: 0;
+    background: var(--background);
+  }
+  .tool-group-label {
+    display: none;
+  }
+  .canvas-tools .selection-tool {
+    margin-top: 12px;
+  }
+  .canvas-tools > .paper-size-label {
+    margin-top: auto;
+    padding-top: 16px;
+    white-space: normal;
+    line-height: 18px;
+  }
+  .canvas-tools > .paper-coordinate-readout {
+    margin-inline: -8px;
+    border: 0;
+  }
+  .canvas-zoom select {
+    background-color: transparent;
+    border-color: transparent;
+    padding-left: 8px;
+  }
+  .canvas-inspector {
+    border: 0;
+  }
+}
+
+/* 新版属性控件以对齐和留白分组，编辑时显示交互边界。 */
+.canvas-inspector .dimension-value,
+.canvas-inspector select,
+.canvas-inspector .vector-name input {
+  background-color: transparent;
+  border-color: transparent;
+}
+.canvas-inspector .dimension-value:hover,
+.canvas-inspector select:hover,
+.canvas-inspector .vector-name input:hover {
+  border-color: var(--line);
+}
+.canvas-inspector .dimension-value:focus-within,
+.canvas-inspector select:focus-visible,
+.canvas-inspector .vector-name input:focus-visible {
+  border-color: var(--focus);
+}
+.canvas-inspector .dimension-value:has(input[aria-invalid="true"]) {
+  border-color: var(--danger-line);
+}
+@media (min-width: 1001px) {
+  .canvas-tools {
+    background: var(--surface-subtle);
+  }
+  .canvas-tools .button:disabled {
+    background: transparent;
+    border-color: transparent;
+  }
+}
+
+.outside-paper-ink {
+  display: none;
+  position: absolute;
+  pointer-events: none;
+  background: var(--text);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  mask-mode: alpha;
+}
+:root[data-theme="abyssus"] .outside-paper-ink {
+  display: block;
+}
+
+.task-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+.task-progress-title {
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-progress-label,
+.task-time {
+  flex-shrink: 0;
+}
+.task-progress progress {
+  appearance: none;
+  width: 160px;
+  min-width: 60px;
+  height: 4px;
+  flex: 1 1 160px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--line);
+  color: var(--primary-bg);
+}
+.task-progress progress::-webkit-progress-bar {
+  background: var(--line);
+  border-radius: 2px;
+}
+.task-progress progress::-webkit-progress-value {
+  background: var(--primary-bg);
+  border-radius: 2px;
+}
+.task-progress progress::-moz-progress-bar {
+  background: var(--primary-bg);
+  border-radius: 2px;
+}
+.console-v1 .current-task:has(.task-progress) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+@media (max-width: 1000px) {
+  .console-v1 .task-bar:has(.task-progress) {
+    height: auto;
+    flex-basis: auto;
+    min-height: 60px;
+    padding-block: 6px;
+  }
+  .task-progress {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(60px, 100px);
+    gap: 4px 8px;
+  }
+  .task-progress-title {
+    max-width: none;
+    grid-column: 1 / -1;
+  }
+  .task-progress progress {
+    width: 100%;
+    min-width: 0;
+  }
+  .task-time {
+    grid-column: 1 / -1;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 1000px) {
+  .task-progress-label {
+    white-space: normal;
+  }
+}
+
+.document-library {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50dvh;
+  overflow: auto;
+}
+.document-library-row,
+.queue-row {
+  border-bottom: 1px solid var(--line);
+  padding-block: 8px;
+}
+.document-library-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.document-library-row .button {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.queue-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.queue-row > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.document-sync-error {
+  grid-column: 1 / -1;
+  padding: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--danger);
+  border-bottom: 1px solid var(--danger-line);
+}
+.single-page-workbench:has(> .document-sync-error) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.single-page-workbench:has(> .document-sync-error) > .canvas-tools,
+.single-page-workbench:has(> .document-sync-error) .page-preview,
+.single-page-workbench:has(> .document-sync-error) .canvas-inspector {
+  grid-row: 2;
+}
+.console-v1 .task-inner > .button {
+  width: auto;
+  white-space: nowrap;
 }

@@ -72,6 +72,9 @@ test.beforeEach(async ({ page }) => {
     seed,
   );
   await page.goto("/");
+  await expect(page.locator(".document-save-status")).toHaveText(
+    "已保存到服务端",
+  );
 });
 for (const key of ["Backspace", "Delete"]) {
   test(`Ctrl+A 全选混排元素，${key} 一次删除并可撤销重做`, async ({ page }) => {

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Job } from "./api";
+import {
+  api,
+  submitPlan,
+  hasPendingSubmission,
+  type Mode,
+  type Job,
+} from "./api";
 import { usePaperPreview } from "./usePaperPreview";
+import { useServerDocument } from "./useServerDocument";
+import { useEditorDefaults } from "./useEditorDefaults";
 
 import {
   blank,
@@ -26,16 +34,15 @@ function initialDocument() {
 }
 type Props = {
   busy: boolean;
+  mode: Mode;
   jobs?: Job[];
   notify: (text: string, error?: boolean) => void;
   refresh: () => void;
 };
-export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
+export function useWorkbench({ mode, jobs, notify, refresh }: Props) {
+  const defaults = useEditorDefaults();
   const [document, setDocument] = useState(initialDocument);
-  // 文件导出检查点与浏览器草稿分别追踪；自动保存不代表已经导出文件。
-  const [saved, setSaved] = useState("");
-  const [cached, setCached] = useState("");
-  const [saveError, setSaveError] = useState<string>();
+  // 服务端文档负责正式保存；浏览器缓存仅用于迁移和恢复。
   const [inputEpoch, setInputEpoch] = useState(0);
   const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
   const inputErrorsRef = useRef<Record<string, string>>({});
@@ -102,14 +109,8 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
       const snapshot = JSON.stringify(next);
       localStorage.setItem(storageKey, snapshot);
       cachedRef.current = snapshot;
-      setCached(snapshot);
-      setSaveError(undefined);
       return true;
-    } catch (error) {
-      setSaveError(
-        "自动保存失败：" +
-          (error instanceof Error ? error.message : "浏览器存储不可用"),
-      );
+    } catch {
       return false;
     }
   }, []);
@@ -135,9 +136,23 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
   const [writing, setWriting] = useState(false);
   const [jobId, setJobId] = useState<number>();
   const posting = useRef(false);
-  const payload = JSON.stringify(document);
-  const dirty = payload !== saved;
-  const locked = busy || writing;
+  const [pendingSubmission, setPendingSubmission] = useState(() =>
+    hasPendingSubmission(),
+  );
+  const server = useServerDocument(document, (next) => {
+    history.current = { past: [], future: [] };
+    latest.current = next;
+    persist(next);
+    setDocument(next);
+    setGeneration((value) => value + 1);
+    resetInputs();
+    refreshHistory();
+  });
+  useEffect(() => {
+    queueMicrotask(() => setPendingSubmission(hasPendingSubmission(server.id)));
+  }, [server.id]);
+  const dirty = !server.synced;
+  const locked = !server.ready || !!server.opening || writing;
   const { preview, error, previewUrl } = usePaperPreview(
     document,
     generation,
@@ -149,12 +164,11 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
   }, [jobs, jobId, writing]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (JSON.stringify(latest.current) !== cachedRef.current)
-        event.preventDefault();
+      if (!server.synced) event.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, []);
+  }, [server.synced]);
   const lockedRef = useRef(locked);
   useEffect(() => {
     lockedRef.current = locked;
@@ -250,10 +264,10 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
     setFitting(true);
     try {
       const result = await api<{
-        table: Table;
+        element: Table;
         diagnostics: Diagnostic[];
         success: boolean;
-      }>("/api/workbench/table-fit", { document, element_id: id });
+      }>("/api/v1/documents/fit-table", { document, element_id: id });
       if (
         lockedRef.current ||
         Object.keys(inputErrorsRef.current).length ||
@@ -262,11 +276,11 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
         notify("文档已变化，请重新自适应", true);
         return;
       }
-      if (!result.success) {
+      if (result.diagnostics.length) {
         notify(result.diagnostics.map((d) => d.message).join("；"), true);
         return;
       }
-      replaceElement(result.table);
+      replaceElement(result.element);
       notify("表格已自适应，外框尺寸保持不变");
     } catch (e) {
       notify(e instanceof Error ? e.message : "自适应失败", true);
@@ -278,25 +292,33 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
     key: K,
     value: WritingDocument[K],
   ) {
-    if (!locked) commit({ ...latest.current, [key]: value });
-  }
-  function newDocument() {
     if (!locked) {
-      resetInputs();
-      endEdit();
-      setGeneration((value) => value + 1);
-      commit(structuredClone(blank));
-      setSaved("");
+      const next = { ...latest.current, [key]: value };
+      commit(next);
     }
   }
-  function save() {
+  async function newDocument() {
+    if (locked) return;
+    try {
+      await server.create(structuredClone(blank));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "新建失败", true);
+    }
+  }
+  async function save() {
     if (invalidInput()) return;
     try {
       endEdit();
       const current = latest.current;
       const payload = JSON.stringify(current);
       readDocument(current);
-      const cached = persist(current);
+      persist(current);
+      let synced = true;
+      try {
+        await server.flush();
+      } catch {
+        synced = false;
+      }
       const url = URL.createObjectURL(
         new Blob([payload], { type: "application/json" }),
       );
@@ -307,12 +329,11 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
         ".pygmalion.json";
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setSaved(payload);
       notify(
-        cached
-          ? "文档已自动保存到本机，并导出文件"
-          : "文件已导出；本机自动保存失败，请重试",
-        !cached,
+        synced
+          ? "文档已保存到服务端，并导出副本"
+          : "文件已导出；服务端保存失败，请重试",
+        !synced,
       );
     } catch (e) {
       notify(e instanceof Error ? e.message : "保存失败，请重试", true);
@@ -323,27 +344,26 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
     try {
       if (input.size > 4_000_000) throw new Error("文档文件过大");
       const text = await input.text();
+      if (input.name.toLowerCase().endsWith(".txt") && !defaults.data)
+        throw new Error("默认字号尚未读取，请读取成功后再导入文本");
       const next = input.name.toLowerCase().endsWith(".txt")
         ? readDocument({
             name: input.name.replace(/\.txt$/i, ""),
             paper: "A4",
             margin_mm: 20,
             body: text,
+            font_size_mm: defaults.data?.font_size_mm,
           })
         : readDocument(JSON.parse(text));
       if (next.elements.some((e) => e.type === "vector"))
-        await api("/api/workbench/validate", next);
+        await api("/api/v1/documents/validate", next);
       if (latest.current !== baseline)
         throw new Error("文档已变化，请重新打开文件");
       if (lockedRef.current) {
         notify("书写中无法打开文档", true);
         return;
       }
-      endEdit();
-      setGeneration((value) => value + 1);
-      resetInputs();
-      commit(next);
-      setSaved(JSON.stringify(next));
+      await server.create(next);
       notify(
         "文档已打开" +
           (!input.name.toLowerCase().endsWith(".txt") &&
@@ -364,20 +384,13 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
     setImporting(true);
     try {
       if (input.size > 1_000_000) throw new Error("SVG 文件不能超过 1 MB");
-      const result = await api<
-        Pick<
-          VectorElement,
-          | "name"
-          | "paths"
-          | "width_mm"
-          | "height_mm"
-          | "fill_rules"
-          | "draw_mode"
-        >
-      >("/api/workbench/import-svg", {
-        source: await input.text(),
-        name: input.name.replace(/\.svg$/i, "").slice(0, 120),
-      });
+      const { element: result } = await api<{ element: VectorElement }>(
+        "/api/v1/imports/svg",
+        {
+          source: await input.text(),
+          name: input.name.replace(/\.svg$/i, "").slice(0, 120),
+        },
+      );
       if (lockedRef.current || latest.current !== baseline)
         throw new Error("文档已变化，请重新导入 SVG");
       if (latest.current.elements.length >= 100)
@@ -388,14 +401,6 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
         elements: [...latest.current.elements, vector],
       };
       readDocument(next);
-      // 在改变文档前验证本机存储空间；失败时保留原文档。
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(next));
-      } catch {
-        throw new Error(
-          "SVG 导入失败：本机存储空间不足或不可用，请先导出当前文档",
-        );
-      }
       endEdit();
       commit(next);
       notify(
@@ -411,40 +416,48 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
       setImporting(false);
     }
   }
-  const canWrite =
-    !!document.elements.length &&
-    !!preview?.can_print &&
-    !preview.overflow &&
-    !preview.missing.length &&
-    !error &&
-    !locked &&
-    !fitting &&
-    !Object.keys(inputErrors).length &&
-    !composing;
+  const canWrite = pendingSubmission
+    ? !locked
+    : !!document.elements.length &&
+      !!preview?.can_print &&
+      !preview.overflow &&
+      !preview.missing.length &&
+      !error &&
+      !locked &&
+      !fitting &&
+      !Object.keys(inputErrors).length &&
+      !composing;
   async function write() {
-    if (!canWrite || posting.current || invalidInput()) return;
+    if (
+      (!pendingSubmission && !canWrite) ||
+      posting.current ||
+      (!pendingSubmission && invalidInput())
+    )
+      return;
     posting.current = true;
     setWriting(true);
     try {
-      const result = await api<{ job_id: number; dry_run: boolean }>(
-        "/api/workbench/write",
-        document,
-      );
-      setJobId(result.job_id);
+      await server.flush();
+      const result = await submitPlan(preview?.plan_id || "", mode, server.id);
+      setJobId(result.id);
       refresh();
       notify(
-        result.dry_run
-          ? "演练任务已开始，纸面与参数已冻结"
-          : "书写任务已开始，纸面与参数已冻结",
+        pendingSubmission
+          ? `已找回任务 #${result.id}，请查看任务状态`
+          : result.mode === "simulate"
+            ? "演练任务已入队，内容与参数已冻结"
+            : "书写任务已入队，内容与参数已冻结",
       );
     } catch (e) {
       setWriting(false);
       notify(e instanceof Error ? e.message : "书写失败", true);
     } finally {
+      setPendingSubmission(hasPendingSubmission(server.id));
       posting.current = false;
     }
   }
   return {
+    defaults,
     document,
     importSvg,
     importing,
@@ -460,12 +473,16 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
     replaceText,
     composing,
     setComposing,
-    saveError,
+    saveError: server.error,
+    server,
     inputEpoch,
     inputErrors,
     reportInput,
-    locallySaved: cached === payload && !saveError,
-    retrySave: () => persist(latest.current),
+    locallySaved: server.synced,
+    retrySave: () =>
+      void (server.ready ? server.flush() : server.reload()).catch((error) =>
+        notify(error.message, true),
+      ),
     fit,
     fitting,
     notify,
@@ -477,6 +494,7 @@ export function useWorkbench({ busy, jobs, notify, refresh }: Props) {
     canWrite,
     writing,
     jobId,
+    pendingSubmission,
     newDocument,
     save,
     open,

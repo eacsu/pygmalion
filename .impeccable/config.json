@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-10-30T10:14:45.809Z",
+        "reason": "Agent restoration review: the existing abyssus-vallum design system explicitly specifies Inter/system-ui for Latin text and numerals; restoring the previous interface preserves that intentional choice."
+      }
+    ]
+  }
+}

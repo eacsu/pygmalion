@@ -47,12 +47,14 @@ class CJKSource:
 
     @staticmethod
     def _center_ink(polys: list[Polyline]) -> list[Polyline]:
-        """以每个字自己的墨迹框居中，但绝不改变笔画的比例或顺序。
+        """以每个字自己的墨迹框居中，过大的字形等比缩入一个 em。
 
         导入字库以整套字体的公共框心归一化；对于「一」这类只占一条细横
         的字，公共框会把它留在格子的顶端或底端。排版传入的是字格中心，
         因而应在字形层消除这份单字偏移。这样既保留字的实际大小，也让
-        所有“占不满字格”的字落在自己的格心。
+        所有“占不满字格”的字落在自己的格心。部分原始字形宽高超过
+        一个 em，必须等比缩小，否则按字格排版时会越界；小字不放大，
+        笔画比例与顺序保持不变。preserve_origin 字形不经过此转换。
         """
         points = [point for poly in polys for point in poly]
         if not points:
@@ -60,7 +62,11 @@ class CJKSource:
         xs, ys = zip(*points)
         dx = -((min(xs) + max(xs)) / 2.0)
         dy = -((min(ys) + max(ys)) / 2.0)
-        return [[(x + dx, y + dy) for x, y in poly] for poly in polys]
+        extent = max(max(xs) - min(xs), max(ys) - min(ys))
+        scale = 1.0 / extent if extent > 1.0 else 1.0
+        return [
+            [((x + dx) * scale, (y + dy) * scale) for x, y in poly] for poly in polys
+        ]
 
     @property
     def points(self) -> int:

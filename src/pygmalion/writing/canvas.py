@@ -158,43 +158,28 @@ def table_lines(table: Table, max_segment_mm: float = 5.0) -> list[Stroke]:
     return strokes
 
 
-def prepare_canvas(doc: CanvasDocument) -> tuple[Prepared, bool]:
+def prepare_canvas(
+    doc: CanvasDocument, *, pen_position: tuple[float, float] | None = None
+) -> tuple[Prepared, bool]:
+    if any(
+        element.type != "vector" for element in doc.elements
+    ) and not registry.discover(ROOT):
+        raise ValueError("未找到书写字库，请安装字体数据集或检查字体目录配置后重试")
     page = page_config(doc)
     cfg = build_configs({"handwriting": False, "seed": 0})
+    return_position = (0.0, 0.0)
+    if doc.pen_anchor:
+        # 预览用零点演算相对轨迹；真正入队前使用同一连接读取的工作坐标。
+        return_position = pen_position or (0.0, 0.0)
+        tf = gcode.PageToMachine(cfg["machine"], page)
+        ax, ay = tf(doc.pen_anchor.x_mm, doc.pen_anchor.y_mm)
+        cfg["machine"].offset_x += return_position[0] - ax
+        cfg["machine"].offset_y += return_position[1] - ay
     strokes, missing, diagnostics, layouts = [], [], [], []
     glyph_count = 0
     for element in doc.elements:
-        invalid = (
-            element.x_mm < doc.margin_mm - 1e-6
-            or element.y_mm < doc.margin_mm - 1e-6
-            or element.x_mm + element.width_mm > page.width_mm - doc.margin_mm + 1e-6
-            or element.y_mm + element.height_mm > page.height_mm - doc.margin_mm + 1e-6
-        )
-        if invalid:
-            diagnostics.append(
-                {
-                    "element_id": element.id,
-                    "code": "bounds",
-                    "message": "元素超出纸面可写范围",
-                }
-            )
         if isinstance(element, Vector):
             paths = vector_strokes(element)
-            if any(
-                x < doc.margin_mm - 1e-5
-                or y < doc.margin_mm - 1e-5
-                or x > page.width_mm - doc.margin_mm + 1e-5
-                or y > page.height_mm - doc.margin_mm + 1e-5
-                for stroke in paths
-                for x, y in stroke.points
-            ):
-                diagnostics.append(
-                    {
-                        "element_id": element.id,
-                        "code": "bounds",
-                        "message": "矢量路径超出纸面可写范围",
-                    }
-                )
             strokes.extend(paths)
             layouts.append({"element_id": element.id, "regions": []})
             continue
@@ -270,14 +255,23 @@ def prepare_canvas(doc: CanvasDocument) -> tuple[Prepared, bool]:
                 }
             )
         layouts.append({"element_id": element.id, "regions": region_layouts})
-    svg = strokes_to_svg(strokes, page, color="#252a2a", bg="#f8f7f2")
-    guide = f'<rect x="{doc.margin_mm}" y="{doc.margin_mm}" width="{page.usable_w}" height="{page.usable_h}" fill="none" stroke="#252a2a" stroke-opacity="0.16" stroke-width="0.5" stroke-dasharray="1.5 2"/>'
-    svg = svg.replace("</svg>", guide + "</svg>")
+    # 纸张仅作参考背景，预览范围包含全部内容；机器坐标不裁剪。
+    left = min([0.0] + [e.x_mm for e in doc.elements])
+    top = min([0.0] + [e.y_mm for e in doc.elements])
+    right = max([page.width_mm] + [e.x_mm + e.width_mm for e in doc.elements])
+    bottom = max([page.height_mm] + [e.y_mm + e.height_mm for e in doc.elements])
+    svg = strokes_to_svg(strokes, page, color="#252a2a", bg="none")
+    svg = svg.replace(
+        f'viewBox="0 0 {page.width_mm:g} {page.height_mm:g}"',
+        f'viewBox="{left:g} {top:g} {right - left:g} {bottom - top:g}"',
+    )
     overflow = any(d["code"] in ("bounds", "overflow") for d in diagnostics)
     result = Prepared(
         submission_id=0,
         poem=Poem(body=doc.body, direction="horizontal"),
-        gcode=gcode.strokes_to_gcode(strokes, page, cfg["machine"]),
+        gcode=gcode.strokes_to_gcode(
+            strokes, page, cfg["machine"], return_position=return_position
+        ),
         svg=svg,
         strokes=len(strokes),
         cells=glyph_count,

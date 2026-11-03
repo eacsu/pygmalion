@@ -1,24 +1,22 @@
 const RULER_SIZE = 24;
 
 export function PaperRulers({
-  width,
-  height,
   scale,
   view,
   cursor,
 }: {
-  width: number;
-  height: number;
   scale: number;
   view: { x: number; y: number; width: number; height: number };
   cursor?: { x: number; y: number };
 }) {
   const minor = scale >= 5 ? 1 : scale >= 0.7 ? 5 : 10;
   const labels = [10, 20, 50, 100].find((step) => step * scale >= 36) || 100;
-  function ticks(length: number, offset: number, vertical: boolean) {
+  function ticks(offset: number, vertical: boolean) {
+    const visible = vertical ? view.height : view.width;
+    const start = Math.floor(-offset / scale / minor) * minor;
     return Array.from(
-      { length: Math.floor(length / minor) + 1 },
-      (_, i) => i * minor,
+      { length: Math.ceil(visible / scale / minor) + 2 },
+      (_, i) => start + i * minor,
     ).map((mm) => {
       const pos = offset + mm * scale,
         major = mm % labels === 0;
@@ -59,7 +57,7 @@ export function PaperRulers({
         viewBox={`0 0 ${Math.max(1, view.width)} ${RULER_SIZE}`}
         preserveAspectRatio="none"
       >
-        {ticks(width, view.x, false)}
+        {ticks(view.x, false)}
         {cursor && (
           <line
             className="ruler-cursor"
@@ -78,7 +76,7 @@ export function PaperRulers({
         viewBox={`0 0 ${RULER_SIZE} ${Math.max(1, view.height)}`}
         preserveAspectRatio="none"
       >
-        {ticks(height, view.y, true)}
+        {ticks(view.y, true)}
         {cursor && (
           <line
             className="ruler-cursor"
