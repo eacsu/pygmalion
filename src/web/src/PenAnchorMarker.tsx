@@ -4,6 +4,7 @@ export type PenAnchor = { x_mm: number; y_mm: number };
 
 export function PenAnchorMarker({
   anchor,
+  bound = true,
   width,
   height,
   scale,
@@ -13,6 +14,7 @@ export function PenAnchorMarker({
   change,
 }: {
   anchor: PenAnchor;
+  bound?: boolean;
   width: number;
   height: number;
   scale: number;
@@ -35,6 +37,12 @@ export function PenAnchorMarker({
   >(undefined);
   const [draft, setDraft] = useState<PenAnchor>();
   const point = draft ?? anchor;
+  // 笔尖朝右上方伸出，原点处的主体位于纸外，不能按尖端坐标选纸面墨色。
+  const bodyInside =
+    point.x_mm * scale + 9 >= 0 &&
+    point.y_mm * scale - 9 >= 0 &&
+    point.x_mm * scale + 9 <= width * scale &&
+    point.y_mm * scale - 9 <= height * scale;
   function cancel() {
     const old = gesture.current;
     gesture.current = undefined;
@@ -67,18 +75,16 @@ export function PenAnchorMarker({
       className={`pen-anchor-marker${selected ? " selected" : ""}`}
       aria-label="笔头定位点"
       aria-pressed={selected}
-      title={`笔头定位：X ${point.x_mm} / Y ${point.y_mm} mm；拖动不会移动机器`}
+      title={
+        bound
+          ? `笔头定位：X ${point.x_mm} / Y ${point.y_mm} mm；拖动不会移动机器`
+          : "尚未绑定笔头；标记暂显示纸面原点，拖动或输入坐标设置定位"
+      }
       disabled={locked}
       style={{
         left: point.x_mm * scale,
         top: point.y_mm * scale,
-        color:
-          point.x_mm >= 0 &&
-          point.y_mm >= 0 &&
-          point.x_mm <= width &&
-          point.y_mm <= height
-            ? "var(--paper-ink)"
-            : "var(--text)",
+        color: bodyInside ? "var(--paper-ink)" : "var(--text)",
       }}
       onClick={(event) => {
         event.stopPropagation();
@@ -140,9 +146,12 @@ export function PenAnchorMarker({
         aria-hidden="true"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.5"
+        strokeWidth="1.8"
       >
-        <path d="M16 16l6-12 6 6-12 6ZM22 4l6 6" />
+        <path
+          fill={bodyInside ? "var(--paper-bg)" : "var(--background)"}
+          d="M16 16 25-2 34 7ZM25-2 34 7M16 16 27 5"
+        />
       </svg>
     </button>
   );

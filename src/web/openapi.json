@@ -1086,6 +1086,320 @@
         }
       }
     },
+    "/api/v1/circuits/symbols": {
+      "get": {
+        "summary": "Circuit Symbols",
+        "operationId": "circuit_symbols_api_v1_circuits_symbols_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CircuitSymbols"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/circuits/render": {
+      "post": {
+        "summary": "Circuit Render",
+        "operationId": "circuit_render_api_v1_circuits_render_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CircuitElement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CircuitRender"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/circuits/layout": {
+      "post": {
+        "summary": "Circuit Layout",
+        "operationId": "circuit_layout_api_v1_circuits_layout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CircuitElement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CircuitRender"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/imports/svg": {
       "post": {
         "summary": "Import Svg",
@@ -5014,9 +5328,12 @@
         "properties": {
           "version": {
             "type": "integer",
-            "const": 2,
+            "enum": [
+              2,
+              3
+            ],
             "title": "Version",
-            "default": 2
+            "default": 3
           },
           "name": {
             "type": "string",
@@ -5051,11 +5368,15 @@
                 },
                 {
                   "$ref": "#/components/schemas/Vector"
+                },
+                {
+                  "$ref": "#/components/schemas/CircuitElement"
                 }
               ],
               "discriminator": {
                 "propertyName": "type",
                 "mapping": {
+                  "circuit": "#/components/schemas/CircuitElement",
                   "table": "#/components/schemas/Table",
                   "text": "#/components/schemas/TextBox",
                   "vector": "#/components/schemas/Vector"
@@ -5140,6 +5461,286 @@
           "allowed_job_modes"
         ],
         "title": "Capabilities"
+      },
+      "ChipPin": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "top",
+              "bottom"
+            ],
+            "title": "Side"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Label",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "side"
+        ],
+        "title": "ChipPin"
+      },
+      "CircuitElement": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "x_mm": {
+            "type": "number",
+            "title": "X Mm",
+            "default": 20
+          },
+          "y_mm": {
+            "type": "number",
+            "title": "Y Mm",
+            "default": 20
+          },
+          "width_mm": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Width Mm",
+            "default": 120
+          },
+          "height_mm": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Height Mm",
+            "default": 80
+          },
+          "type": {
+            "type": "string",
+            "const": "circuit",
+            "title": "Type",
+            "default": "circuit"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Name",
+            "default": "电路图"
+          },
+          "scale": {
+            "type": "number",
+            "maximum": 20.0,
+            "minimum": 0.05,
+            "title": "Scale",
+            "default": 1
+          },
+          "font": {
+            "type": "string",
+            "maxLength": 240,
+            "title": "Font",
+            "default": ""
+          },
+          "label_size_mm": {
+            "type": "number",
+            "maximum": 12.0,
+            "minimum": 1.5,
+            "title": "Label Size Mm",
+            "default": 3
+          },
+          "circuit": {
+            "$ref": "#/components/schemas/CircuitSpec"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "circuit"
+        ],
+        "title": "CircuitElement"
+      },
+      "CircuitRender": {
+        "properties": {
+          "element": {
+            "$ref": "#/components/schemas/CircuitElement"
+          },
+          "svg": {
+            "type": "string",
+            "title": "Svg"
+          },
+          "layout": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Layout"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/Diagnostic"
+            },
+            "type": "array",
+            "title": "Diagnostics"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "element",
+          "svg",
+          "layout",
+          "diagnostics"
+        ],
+        "title": "CircuitRender"
+      },
+      "CircuitSpec": {
+        "properties": {
+          "standard": {
+            "type": "string",
+            "enum": [
+              "IEC",
+              "ANSI"
+            ],
+            "title": "Standard",
+            "default": "IEC"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/Component"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Components"
+          },
+          "junctions": {
+            "items": {
+              "$ref": "#/components/schemas/Junction"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Junctions"
+          },
+          "wires": {
+            "items": {
+              "$ref": "#/components/schemas/Wire"
+            },
+            "type": "array",
+            "maxItems": 300,
+            "title": "Wires"
+          },
+          "uncertainties": {
+            "items": {
+              "$ref": "#/components/schemas/Uncertainty"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Uncertainties"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "components"
+        ],
+        "title": "CircuitSpec"
+      },
+      "CircuitSymbol": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "resistor",
+              "capacitor",
+              "capacitor_polar",
+              "inductor",
+              "voltage_source",
+              "current_source",
+              "ac_source",
+              "ground",
+              "diode",
+              "zener",
+              "led",
+              "npn",
+              "pnp",
+              "nmos",
+              "pmos",
+              "opamp",
+              "switch",
+              "chip"
+            ],
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "pins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pins"
+          },
+          "default_length_mm": {
+            "type": "number",
+            "title": "Default Length Mm"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "name",
+          "pins",
+          "default_length_mm"
+        ],
+        "title": "CircuitSymbol"
+      },
+      "CircuitSymbols": {
+        "properties": {
+          "symbols": {
+            "items": {
+              "$ref": "#/components/schemas/CircuitSymbol"
+            },
+            "type": "array",
+            "title": "Symbols"
+          },
+          "units": {
+            "type": "string",
+            "const": "mm",
+            "title": "Units",
+            "default": "mm"
+          },
+          "standards": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "IEC",
+                "ANSI"
+              ]
+            },
+            "type": "array",
+            "title": "Standards"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "symbols",
+          "standards"
+        ],
+        "title": "CircuitSymbols"
       },
       "Collection_Backup_": {
         "properties": {
@@ -5252,6 +5853,119 @@
           "data"
         ],
         "title": "Collection[SerialPort]"
+      },
+      "Component": {
+        "properties": {
+          "x_mm": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": -10000.0,
+            "title": "X Mm"
+          },
+          "y_mm": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": -10000.0,
+            "title": "Y Mm"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "resistor",
+              "capacitor",
+              "capacitor_polar",
+              "inductor",
+              "voltage_source",
+              "current_source",
+              "ac_source",
+              "ground",
+              "diode",
+              "zener",
+              "led",
+              "npn",
+              "pnp",
+              "nmos",
+              "pmos",
+              "opamp",
+              "switch",
+              "chip"
+            ],
+            "title": "Kind"
+          },
+          "reference": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Reference",
+            "default": ""
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Value",
+            "default": ""
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Label",
+            "default": ""
+          },
+          "angle": {
+            "type": "integer",
+            "enum": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "title": "Angle",
+            "default": 0
+          },
+          "length_mm": {
+            "type": "number",
+            "maximum": 200.0,
+            "minimum": 3.0,
+            "title": "Length Mm",
+            "default": 15
+          },
+          "label_dx_mm": {
+            "type": "number",
+            "maximum": 200.0,
+            "minimum": -200.0,
+            "title": "Label Dx Mm",
+            "default": 0
+          },
+          "label_dy_mm": {
+            "type": "number",
+            "maximum": 200.0,
+            "minimum": -200.0,
+            "title": "Label Dy Mm",
+            "default": -5
+          },
+          "chip_pins": {
+            "items": {
+              "$ref": "#/components/schemas/ChipPin"
+            },
+            "type": "array",
+            "maxItems": 40,
+            "title": "Chip Pins"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "x_mm",
+          "y_mm",
+          "id",
+          "kind"
+        ],
+        "title": "Component"
       },
       "ConfigResource_CalibrationSettings_": {
         "properties": {
@@ -5734,6 +6448,46 @@
         "type": "object",
         "title": "EditorPatch"
       },
+      "Endpoint": {
+        "properties": {
+          "component_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Id"
+          },
+          "pin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pin"
+          },
+          "junction_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Junction Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Endpoint"
+      },
       "ErrorResponse": {
         "properties": {
           "error": {
@@ -6136,6 +6890,42 @@
         "title": "JogCommand"
       },
       "JsonValue": {},
+      "Junction": {
+        "properties": {
+          "x_mm": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": -10000.0,
+            "title": "X Mm"
+          },
+          "y_mm": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": -10000.0,
+            "title": "Y Mm"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Label",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "x_mm",
+          "y_mm",
+          "id"
+        ],
+        "title": "Junction"
+      },
       "MachineSnapshot": {
         "additionalProperties": false,
         "properties": {
@@ -6402,6 +7192,29 @@
           "cells"
         ],
         "title": "Plan"
+      },
+      "Point": {
+        "properties": {
+          "x_mm": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": -10000.0,
+            "title": "X Mm"
+          },
+          "y_mm": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": -10000.0,
+            "title": "Y Mm"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "x_mm",
+          "y_mm"
+        ],
+        "title": "Point"
       },
       "Problem": {
         "additionalProperties": false,
@@ -7207,6 +8020,29 @@
         ],
         "title": "TextBox"
       },
+      "Uncertainty": {
+        "properties": {
+          "target_id": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Target Id"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "target_id",
+          "message"
+        ],
+        "title": "Uncertainty"
+      },
       "ValidationResult": {
         "properties": {
           "valid": {
@@ -7339,6 +8175,47 @@
           "paths"
         ],
         "title": "Vector"
+      },
+      "Wire": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "start": {
+            "$ref": "#/components/schemas/Endpoint"
+          },
+          "end": {
+            "$ref": "#/components/schemas/Endpoint"
+          },
+          "waypoints": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Waypoints"
+          },
+          "first_axis": {
+            "type": "string",
+            "enum": [
+              "horizontal",
+              "vertical"
+            ],
+            "title": "First Axis",
+            "default": "horizontal"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "start",
+          "end"
+        ],
+        "title": "Wire"
       },
       "JobEvent": {
         "additionalProperties": false,

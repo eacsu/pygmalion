@@ -1,0 +1,151 @@
+{
+  "id": "circuit-opamp-inverting",
+  "x_mm": 20.0,
+  "y_mm": 20.0,
+  "width_mm": 120.0,
+  "height_mm": 80.0,
+  "type": "circuit",
+  "name": "opamp-inverting",
+  "scale": 1.0,
+  "font": "",
+  "label_size_mm": 3.0,
+  "circuit": {
+    "standard": "IEC",
+    "components": [
+      {
+        "x_mm": 55.0,
+        "y_mm": 40.0,
+        "id": "u1",
+        "kind": "opamp",
+        "reference": "U1",
+        "value": "",
+        "label": "",
+        "angle": 0,
+        "length_mm": 15.0,
+        "label_dx_mm": 8.0,
+        "label_dy_mm": -8.0
+      },
+      {
+        "x_mm": 20.0,
+        "y_mm": 35.0,
+        "id": "r1",
+        "kind": "resistor",
+        "reference": "R1",
+        "value": "10kΩ",
+        "label": "",
+        "angle": 0,
+        "length_mm": 20.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 60.0,
+        "y_mm": 15.0,
+        "id": "rf",
+        "kind": "resistor",
+        "reference": "RF",
+        "value": "100kΩ",
+        "label": "",
+        "angle": 0,
+        "length_mm": 20.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 35.0,
+        "y_mm": 65.0,
+        "id": "g1",
+        "kind": "ground",
+        "reference": "",
+        "value": "",
+        "label": "",
+        "angle": 0,
+        "length_mm": 15.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      }
+    ],
+    "junctions": [],
+    "wires": [
+      {
+        "id": "w1",
+        "start": {
+          "component_id": "r1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "u1",
+          "pin": "in1",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w2",
+        "start": {
+          "component_id": "rf",
+          "pin": "start",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "u1",
+          "pin": "in1",
+          "junction_id": null
+        },
+        "waypoints": [
+          {
+            "x_mm": 45.0,
+            "y_mm": 15.0
+          },
+          {
+            "x_mm": 45.0,
+            "y_mm": 35.0
+          }
+        ],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w3",
+        "start": {
+          "component_id": "rf",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "u1",
+          "pin": "out",
+          "junction_id": null
+        },
+        "waypoints": [
+          {
+            "x_mm": 90.0,
+            "y_mm": 15.0
+          },
+          {
+            "x_mm": 90.0,
+            "y_mm": 40.0
+          }
+        ],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w4",
+        "start": {
+          "component_id": "u1",
+          "pin": "in2",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "g1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      }
+    ],
+    "uncertainties": []
+  }
+}

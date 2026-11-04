@@ -191,7 +191,7 @@ test("失败和重试保留上次笔迹，撤销重做也不会清屏或放行�
   await page.getByRole("gridcell", { name: /^单元格 1行1列/ }).click();
   await editor.fill("甲乙丙");
   await expect(page.locator(".inline-preview-status")).toContainText(
-    "预览图片加载失败",
+    "预览坐标范围不正确",
   );
   await expect(image).toHaveAttribute("src", recovered!);
   await expect(

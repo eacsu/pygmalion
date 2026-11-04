@@ -44,13 +44,17 @@ export function TaskProgress({ job }: { job: Job }) {
         {job.title || "当前文档"}
         {job.dry_run ? " · 演练" : ""}
       </span>
-      <span className="task-progress-label">
-        指令发送进度 {Math.round(percent)}%
-        {active && percent >= 100 && job.status !== "cancelling"
-          ? " · 等待设备完成"
-          : ""}
-      </span>
-      <progress aria-label="指令发送进度" max={100} value={percent} />
+      {active && (
+        <span className="task-progress-label">
+          指令发送进度 {Math.round(percent)}%
+          {active && percent >= 100 && job.status !== "cancelling"
+            ? " · 等待设备完成"
+            : ""}
+        </span>
+      )}
+      {active && (
+        <progress aria-label="指令发送进度" max={100} value={percent} />
+      )}
       <span className="task-time numeric" aria-live="off" title={estimateHelp}>
         {time}
       </span>

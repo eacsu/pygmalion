@@ -219,7 +219,7 @@ test("旧文档迁移横排及键盘编辑和合并", async ({ page }) => {
     page.getByRole("button", { name: "文本框：甲乙", exact: true }),
   ).toBeFocused();
   const doc = await exportDocument(page);
-  expect(doc.version).toBe(2);
+  expect(doc.version).toBe(3);
   expect(doc.elements[0].text).toBe("甲乙");
 });
 
@@ -334,7 +334,7 @@ test("键盘选区合并拆分、删除确认和表格线单独书写", async ({
   await page.screenshot({ path: "test-results/canvas-table-night.png" });
 });
 
-test("Ctrl滚轮只缩放纸面，毫米刻度随滚动对齐且文档尺寸不变", async ({
+test("Ctrl滚轮只缩放纸面，移除常驻刻度后文档尺寸与坐标不变", async ({
   page,
 }) => {
   await page.goto("/");
@@ -407,35 +407,7 @@ test("Ctrl滚轮只缩放纸面，毫米刻度随滚动对齐且文档尺寸不�
     el.scrollLeft = 123;
     el.scrollTop = 180;
   });
-  await expect
-    .poll(async () => {
-      return page.evaluate(() => {
-        const paper = document
-          .querySelector(".canvas-paper")!
-          .getBoundingClientRect();
-        const horizontal = document
-          .querySelector(".paper-ruler.horizontal")!
-          .getBoundingClientRect();
-        const vertical = document
-          .querySelector(".paper-ruler.vertical")!
-          .getBoundingClientRect();
-        const x = document
-          .querySelector('.paper-ruler.horizontal [data-mm="50"] line')
-          ?.getAttribute("x1");
-        const y = document
-          .querySelector('.paper-ruler.vertical [data-mm="100"] line')
-          ?.getAttribute("y1");
-        if (x === undefined || x === null || y === undefined || y === null)
-          return 1000;
-        return Math.max(
-          Math.abs(
-            horizontal.left + Number(x) - (paper.left + (50 * 96) / 25.4),
-          ),
-          Math.abs(vertical.top + Number(y) - (paper.top + (100 * 96) / 25.4)),
-        );
-      });
-    })
-    .toBeLessThan(0.6);
+  await expect(page.locator(".paper-ruler")).toHaveCount(0);
   const rect = (await paper.boundingBox())!;
   const px = rect.x + (50 * 96) / 25.4,
     py = rect.y + (100 * 96) / 25.4;
@@ -489,24 +461,7 @@ test("H 小手自由平移，Esc 返回选择，输入与元素坐标不受影�
   expect(after.width).toBe(before.width);
   expect(after.height).toBe(before.height);
   expect(await exportDocument(page)).toEqual(saved);
-  await expect
-    .poll(async () => {
-      return page.evaluate(() => {
-        const tick = document.querySelector(
-          '.paper-ruler.horizontal [data-mm="0"] line',
-        );
-        if (!tick) return 1000;
-        return Math.abs(
-          document
-            .querySelector(".paper-ruler.horizontal")!
-            .getBoundingClientRect().left +
-            Number(tick.getAttribute("x1")) -
-            document.querySelector(".canvas-paper")!.getBoundingClientRect()
-              .left,
-        );
-      });
-    })
-    .toBeLessThan(0.6);
+  await expect(page.locator(".paper-ruler")).toHaveCount(0);
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + 15, y + 10);

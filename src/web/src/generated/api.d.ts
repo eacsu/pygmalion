@@ -142,6 +142,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/circuits/symbols": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Circuit Symbols */
+        get: operations["circuit_symbols_api_v1_circuits_symbols_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/circuits/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Circuit Render */
+        post: operations["circuit_render_api_v1_circuits_render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/circuits/layout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Circuit Layout */
+        post: operations["circuit_layout_api_v1_circuits_layout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports/svg": {
         parameters: {
             query?: never;
@@ -726,10 +777,10 @@ export interface components {
         CanvasDocument: {
             /**
              * Version
-             * @default 2
-             * @constant
+             * @default 3
+             * @enum {integer}
              */
-            version: 2;
+            version: 2 | 3;
             /**
              * Name
              * @default 未命名文档
@@ -747,7 +798,7 @@ export interface components {
              */
             margin_mm: number;
             /** Elements */
-            elements?: (components["schemas"]["TextBox"] | components["schemas"]["Table"] | components["schemas"]["Vector"])[];
+            elements?: (components["schemas"]["TextBox"] | components["schemas"]["Table"] | components["schemas"]["Vector"] | components["schemas"]["CircuitElement"])[];
             pen_anchor?: components["schemas"]["PenAnchor"] | null;
         };
         /** Capabilities */
@@ -786,6 +837,128 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** ChipPin */
+        ChipPin: {
+            /** Name */
+            name: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "left" | "right" | "top" | "bottom";
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+        };
+        /** CircuitElement */
+        CircuitElement: {
+            /** Id */
+            id: string;
+            /**
+             * X Mm
+             * @default 20
+             */
+            x_mm: number;
+            /**
+             * Y Mm
+             * @default 20
+             */
+            y_mm: number;
+            /**
+             * Width Mm
+             * @default 120
+             */
+            width_mm: number;
+            /**
+             * Height Mm
+             * @default 80
+             */
+            height_mm: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "circuit";
+            /**
+             * Name
+             * @default 电路图
+             */
+            name: string;
+            /**
+             * Scale
+             * @default 1
+             */
+            scale: number;
+            /**
+             * Font
+             * @default
+             */
+            font: string;
+            /**
+             * Label Size Mm
+             * @default 3
+             */
+            label_size_mm: number;
+            circuit: components["schemas"]["CircuitSpec"];
+        };
+        /** CircuitRender */
+        CircuitRender: {
+            element: components["schemas"]["CircuitElement"];
+            /** Svg */
+            svg: string;
+            /** Layout */
+            layout: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Diagnostics */
+            diagnostics: components["schemas"]["Diagnostic"][];
+        };
+        /** CircuitSpec */
+        CircuitSpec: {
+            /**
+             * Standard
+             * @default IEC
+             * @enum {string}
+             */
+            standard: "IEC" | "ANSI";
+            /** Components */
+            components: components["schemas"]["Component"][];
+            /** Junctions */
+            junctions?: components["schemas"]["Junction"][];
+            /** Wires */
+            wires?: components["schemas"]["Wire"][];
+            /** Uncertainties */
+            uncertainties?: components["schemas"]["Uncertainty"][];
+        };
+        /** CircuitSymbol */
+        CircuitSymbol: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "resistor" | "capacitor" | "capacitor_polar" | "inductor" | "voltage_source" | "current_source" | "ac_source" | "ground" | "diode" | "zener" | "led" | "npn" | "pnp" | "nmos" | "pmos" | "opamp" | "switch" | "chip";
+            /** Name */
+            name: string;
+            /** Pins */
+            pins: string[];
+            /** Default Length Mm */
+            default_length_mm: number;
+        };
+        /** CircuitSymbols */
+        CircuitSymbols: {
+            /** Symbols */
+            symbols: components["schemas"]["CircuitSymbol"][];
+            /**
+             * Units
+             * @default mm
+             * @constant
+             */
+            units: "mm";
+            /** Standards */
+            standards: ("IEC" | "ANSI")[];
+        };
         /** Collection[Backup] */
         Collection_Backup_: {
             /** Data */
@@ -813,6 +986,58 @@ export interface components {
             data: components["schemas"]["SerialPort"][];
             /** Next Cursor */
             next_cursor?: number | null;
+        };
+        /** Component */
+        Component: {
+            /** X Mm */
+            x_mm: number;
+            /** Y Mm */
+            y_mm: number;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "resistor" | "capacitor" | "capacitor_polar" | "inductor" | "voltage_source" | "current_source" | "ac_source" | "ground" | "diode" | "zener" | "led" | "npn" | "pnp" | "nmos" | "pmos" | "opamp" | "switch" | "chip";
+            /**
+             * Reference
+             * @default
+             */
+            reference: string;
+            /**
+             * Value
+             * @default
+             */
+            value: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /**
+             * Angle
+             * @default 0
+             * @enum {integer}
+             */
+            angle: 0 | 90 | 180 | 270;
+            /**
+             * Length Mm
+             * @default 15
+             */
+            length_mm: number;
+            /**
+             * Label Dx Mm
+             * @default 0
+             */
+            label_dx_mm: number;
+            /**
+             * Label Dy Mm
+             * @default -5
+             */
+            label_dy_mm: number;
+            /** Chip Pins */
+            chip_pins?: components["schemas"]["ChipPin"][];
         };
         /** ConfigResource[CalibrationSettings] */
         ConfigResource_CalibrationSettings_: {
@@ -979,6 +1204,15 @@ export interface components {
         EditorPatch: {
             /** Font Size Mm */
             font_size_mm?: number | null;
+        };
+        /** Endpoint */
+        Endpoint: {
+            /** Component Id */
+            component_id?: string | null;
+            /** Pin */
+            pin?: string | null;
+            /** Junction Id */
+            junction_id?: string | null;
         };
         /** ErrorResponse */
         ErrorResponse: {
@@ -1148,6 +1382,20 @@ export interface components {
             distance_mm: number;
         };
         JsonValue: unknown;
+        /** Junction */
+        Junction: {
+            /** X Mm */
+            x_mm: number;
+            /** Y Mm */
+            y_mm: number;
+            /** Id */
+            id: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+        };
         /** MachineSnapshot */
         MachineSnapshot: {
             /**
@@ -1254,6 +1502,13 @@ export interface components {
             cells: number;
             /** Estimated Duration Seconds */
             estimated_duration_seconds?: number | null;
+        };
+        /** Point */
+        Point: {
+            /** X Mm */
+            x_mm: number;
+            /** Y Mm */
+            y_mm: number;
         };
         /** Problem */
         Problem: {
@@ -1640,6 +1895,13 @@ export interface components {
              */
             align: "left" | "center" | "right";
         };
+        /** Uncertainty */
+        Uncertainty: {
+            /** Target Id */
+            target_id: string;
+            /** Message */
+            message: string;
+        };
         /** ValidationResult */
         ValidationResult: {
             /**
@@ -1714,6 +1976,21 @@ export interface components {
              * @default 0
              */
             fill_angle_deg: number;
+        };
+        /** Wire */
+        Wire: {
+            /** Id */
+            id: string;
+            start: components["schemas"]["Endpoint"];
+            end: components["schemas"]["Endpoint"];
+            /** Waypoints */
+            waypoints?: components["schemas"]["Point"][];
+            /**
+             * First Axis
+             * @default horizontal
+             * @enum {string}
+             */
+            first_axis: "horizontal" | "vertical";
         };
         /** JobEvent */
         JobEvent: {
@@ -2623,6 +2900,290 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FitResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    circuit_symbols_api_v1_circuits_symbols_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CircuitSymbols"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    circuit_render_api_v1_circuits_render_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CircuitElement"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CircuitRender"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    circuit_layout_api_v1_circuits_layout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CircuitElement"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CircuitRender"];
                 };
             };
             /** @description Bad Request */

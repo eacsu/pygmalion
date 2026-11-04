@@ -1,11 +1,4 @@
-import {
-  mkdir,
-  copyFile,
-  readdir,
-  access,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readdir, access, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -39,26 +32,21 @@ export default async function prepareRuntime() {
   if (!source) throw new Error("浏览器验证需要 model-bin 下的字体数据集");
   const fonts = path.resolve("../../.cache/e2e/model-bin/cjk-medians-plus");
   await rm(fonts, { recursive: true, force: true });
-  if (source === expanded) {
-    await mkdir(fonts, { recursive: true });
-    await copyFile(source, path.join(fonts, "train.parquet"));
-  } else {
-    // 只有原始字库时，在隔离测试目录生成补字，避免依赖本机未跟踪的产物。
-    await promisify(execFile)(
-      "poetry",
-      [
-        "run",
-        "python",
-        "-m",
-        "pygmalion.commands.app",
-        "build-font",
-        "--base",
-        source,
-        "--output",
-        fonts,
-      ],
-      { cwd: path.resolve("../..") },
-    );
-  }
+  // 在隔离目录补齐当前版本字符，包括电路使用的 Ω / μ；不改本机字库。
+  await promisify(execFile)(
+    "poetry",
+    [
+      "run",
+      "python",
+      "-m",
+      "pygmalion.commands.app",
+      "build-font",
+      "--base",
+      source,
+      "--output",
+      fonts,
+    ],
+    { cwd: path.resolve("../..") },
+  );
   await mkdir(path.resolve("../../.cache/e2e"), { recursive: true });
 }

@@ -51,7 +51,9 @@ def create_plan(document: CanvasDocument):
         diagnostics = [Diagnostic(code="font_unavailable", message=str(exc))]
     result = Plan(
         id=identifier,
-        status="blocked" if diagnostics else "ready",
+        status="blocked"
+        if any(d.severity == "error" for d in diagnostics)
+        else "ready",
         created_at=repository.now(),
         document=document,
         diagnostics=diagnostics,
@@ -64,7 +66,7 @@ def create_plan(document: CanvasDocument):
         strokes=strokes,
         cells=cells,
         estimated_duration_seconds=estimate_seconds(code, machine)
-        if not diagnostics
+        if not any(d.severity == "error" for d in diagnostics)
         else None,
     )
     repository.put_plan(

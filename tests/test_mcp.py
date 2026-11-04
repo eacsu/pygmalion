@@ -1,7 +1,5 @@
 """真实 MCP JSON-RPC 握手、工具调用与共享数据库集成。"""
 
-import json
-
 import pytest
 from mcp.types import LATEST_PROTOCOL_VERSION
 
@@ -43,7 +41,7 @@ def test_mcp_handshake_catalog_and_stateless_connections(client):
     assert info["serverInfo"]["name"] == "Pygmalion"
     assert "save_document" in info["instructions"]
     tools = {t["name"]: t for t in rpc(client, "tools/list")["tools"]}
-    assert len(tools) == 12
+    assert "queue_job" not in tools
     assert tools["import_svg"]["annotations"]["readOnlyHint"]
     assert tools["import_svg"]["inputSchema"]["required"] == ["source"]
     assert (
@@ -51,12 +49,6 @@ def test_mcp_handshake_catalog_and_stateless_connections(client):
         == 1000000
     )
     assert tools["get_document"]["annotations"]["readOnlyHint"]
-    assert tools["queue_job"]["annotations"]["openWorldHint"]
-    assert set(tools["queue_job"]["inputSchema"]["required"]) == {
-        "plan_id",
-        "mode",
-        "idempotency_key",
-    }
     assert client.get("/api/v1/health").status_code == 200
 
 
@@ -101,7 +93,7 @@ def test_mcp_layout_edits_share_database_and_reject_stale_overwrites(client):
     assert call(client, "get_document", document_id="missing")["isError"]
 
 
-def test_mcp_preview_and_idempotent_simulated_queue(client):
+def test_mcp_preview_cannot_submit_but_can_query_tasks(client):
     document = CanvasDocument(elements=[TextBox(id="t", text="甲乙")]).model_dump()
     created = result(
         call(
@@ -118,27 +110,23 @@ def test_mcp_preview_and_idempotent_simulated_queue(client):
     svg = result(call(client, "get_plan_preview", plan_id=plan["id"]))["svg"]
     assert svg == client.get(plan["preview_url"]).text
     assert "<svg" in svg
-    arguments = {
-        "plan_id": plan["id"],
-        "mode": "simulate",
-        "idempotency_key": "mcp-job",
-    }
-    job = result(call(client, "queue_job", **arguments))
-    assert result(call(client, "queue_job", **arguments))["id"] == job["id"]
-    queue = result(call(client, "get_queue"))
-    assert "running" in queue and "queued_total" in queue
-    assert wait(client, f"/api/v1/jobs/{job['id']}")["status"] == "succeeded"
-    assert result(call(client, "get_job", job_id=job["id"]))["status"] == "succeeded"
-    # 没有隐式实机模式；演练实例拒绝请求真实书写。
-    error = call(
+    denied = call(
         client,
         "queue_job",
         plan_id=plan["id"],
         mode="execute",
-        idempotency_key="mcp-real",
+        idempotency_key="forbidden",
     )
-    assert error["isError"]
-    assert "execution_disabled" in json.dumps(error, ensure_ascii=False)
+    assert denied["isError"]
+    assert client.get("/api/v1/jobs").json()["data"] == []
+    job = client.post(
+        "/api/v1/jobs",
+        json={"plan_id": plan["id"], "mode": "simulate"},
+        headers={"Idempotency-Key": "ui-simulate"},
+    ).json()
+    assert "queued_total" in result(call(client, "get_queue"))
+    assert wait(client, f"/api/v1/jobs/{job['id']}")["status"] == "succeeded"
+    assert result(call(client, "get_job", job_id=job["id"]))["status"] == "succeeded"
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,7 @@
 
 import json
 from functools import wraps
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -11,8 +11,9 @@ from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
 from ..schemas.canvas import CanvasDocument, FitRequest, SvgImportRequest
-from ..schemas.public import CreateJob, ImportResult
-from ..servicer import documents, workbench
+from ..schemas.circuit import CircuitElement
+from ..schemas.public import CircuitRender, CircuitSymbols, ImportResult
+from ..servicer import circuits, documents, workbench
 from ..servicer.errors import ServiceError
 from ..servicer.public_errors import PublicError
 
@@ -51,9 +52,11 @@ def create_mcp(application):
             "不得用新版本号强行覆盖他人内容。保存后网页会自动同步。"
             "导入 SVG 文件时，将文件内容传给 import_svg，调整返回 element 的毫米位置与尺寸，"
             "追加到文档 elements，再用 save_document 保存；导入本身不改文档、不移动机器。"
+            "电路使用文档 v3 的 circuit 元素，先 list_circuit_symbols 查看元件和引脚，"
+            "新增电路先调用 layout_circuit 自动整理，保存返回的 element；通过 render_circuit 校核结构与预览；保留照片中不确定项为 uncertainties，不猜测连接。"
             "prepare_document 生成冻结方案和预览，不移动机器。"
-            "只有用户明确要求书写时才 queue_job；execute 会操作实体机器，"
-            "simulate 为演练。重试提交必须复用原 idempotency_key、plan_id 和 mode。"
+            "智能体仅可编辑和预览，不得提交书写任务、调用设备运动接口或启动实体机器。"
+            "实际书写由用户在网页中操作；允许查询状态和请求停止。"
         ),
         host="0.0.0.0",
         stateless_http=True,
@@ -122,6 +125,24 @@ def create_mcp(application):
 
     @server.tool(annotations=read)
     @in_worker
+    def list_circuit_symbols() -> CircuitSymbols:
+        """返回电路图支持的元件类型、引脚名称、默认长度和符号标准。"""
+        return CircuitSymbols.model_validate(checked(circuits.symbols))
+
+    @server.tool(annotations=read)
+    @in_worker
+    def layout_circuit(element: CircuitElement) -> CircuitRender:
+        """自动整理元件间距、正交连线与标注并适配元素尺寸；返回建议，不保存、不移动设备。生成电路优先调用本工具，再保存返回的 element。"""
+        return CircuitRender.model_validate(checked(circuits.layout, element))
+
+    @server.tool(annotations=read)
+    @in_worker
+    def render_circuit(element: CircuitElement) -> CircuitRender:
+        """校核并渲染结构化电路，返回 SVG、元件/引脚几何和诊断；不保存或启动书写。"""
+        return CircuitRender.model_validate(checked(circuits.render, element))
+
+    @server.tool(annotations=read)
+    @in_worker
     def fit_table(
         document_id: str, revision: Revision, element_id: str
     ) -> dict[str, Any]:
@@ -156,20 +177,6 @@ def create_mcp(application):
     def get_job(job_id: int) -> dict[str, Any]:
         """按 ID 查询任务状态、进度及结果，不重新提交任务。"""
         return checked(execution().job, job_id).model_dump(mode="json")
-
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True))
-    @in_worker
-    def queue_job(
-        plan_id: str,
-        mode: Literal["simulate", "execute"],
-        idempotency_key: Key,
-    ) -> dict[str, Any]:
-        """用户要求书写后提交方案；execute 操作实体机器，simulate 仅演练。"""
-        return checked(
-            execution().submit,
-            CreateJob(plan_id=plan_id, mode=mode),
-            idempotency_key,
-        ).model_dump(mode="json")
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True))
     @in_worker

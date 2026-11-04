@@ -48,7 +48,7 @@ test("纸外负坐标、大尺寸和笔头定位可保存、刷新并生成真�
   await expect(page.locator(".inline-preview-status")).toContainText(
     "内容校核通过",
   );
-  await page.getByRole("button", { name: "笔头定位", exact: true }).click();
+  await page.getByRole("button", { name: "笔头定位点", exact: true }).click();
   await page.screenshot({ path: "/tmp/pygmalion-pen-nib.png" });
   await page.getByLabel("笔头 X", { exact: true }).fill("-50");
   await page.getByLabel("笔头 Y", { exact: true }).fill("400");

@@ -20,7 +20,7 @@ from .sources import CJKSource
 ASSET = Path(__file__).with_name("assets") / "NormStroke.svg"
 SOURCE_SHA256 = "acc05c1a18fa3528ca4c70c0847d65b9a319dbafa38fa7f1a60436cd3d243fbc"
 CHINESE_PUNCT = "，。、；：？！“”‘’（）《》〈〉【】—…·「」『』"
-SYMBOLS = "±×÷≤≥≠≈∞√°℃‰¥￥€£"
+SYMBOLS = "±×÷≤≥≠≈∞√°℃‰¥￥€£Ωμµ"
 TARGET_CHARS = "".join(
     dict.fromkeys(
         "".join(map(chr, range(33, 127)))
@@ -176,6 +176,7 @@ def supplemental_glyphs() -> dict[str, Polys]:
         glyphs["C"], sx=0.65, dx=0.12
     )
     glyphs["￥"] = glyphs["¥"]
+    glyphs["µ"] = glyphs["μ"]
     glyphs["€"] = glyphs["C"] + [[(-0.35, y), (0.18, y)] for y in (-0.12, 0.04)]
     glyphs["‰"] = _transform(glyphs["%"], sx=0.7, dx=-0.12) + [_circle(0.32, 0.2, 0.09)]
     for code in range(0xFF01, 0xFF5F):

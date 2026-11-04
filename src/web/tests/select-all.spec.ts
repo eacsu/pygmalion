@@ -88,7 +88,7 @@ for (const key of ["Backspace", "Delete"]) {
     expect((await saved(page)).elements).toEqual([]);
     await page.keyboard.press("Control+z");
     await expect(page.locator(".paper-element")).toHaveCount(3);
-    expect(await saved(page)).toEqual(seed);
+    expect(await saved(page)).toEqual({ ...seed, version: 3 });
     await page.keyboard.press("Control+y");
     await expect(page.locator(".paper-element")).toHaveCount(0);
   });
@@ -124,5 +124,5 @@ test("帮助对话框内快捷键不影响纸面", async ({ page }) => {
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Delete");
-  expect(await saved(page)).toEqual(seed);
+  expect(await saved(page)).toEqual({ ...seed, version: 3 });
 });
