@@ -1,0 +1,118 @@
+{
+  "id": "circuit-common-emitter",
+  "x_mm": 20.0,
+  "y_mm": 20.0,
+  "width_mm": 120.0,
+  "height_mm": 80.0,
+  "type": "circuit",
+  "name": "common-emitter",
+  "scale": 1.0,
+  "font": "",
+  "label_size_mm": 3.0,
+  "circuit": {
+    "standard": "IEC",
+    "components": [
+      {
+        "x_mm": 50.0,
+        "y_mm": 40.0,
+        "id": "q1",
+        "kind": "npn",
+        "reference": "Q1",
+        "value": "NPN",
+        "label": "",
+        "angle": 0,
+        "length_mm": 15.0,
+        "label_dx_mm": 14.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 25.0,
+        "y_mm": 40.0,
+        "id": "r1",
+        "kind": "resistor",
+        "reference": "R1",
+        "value": "10kΩ",
+        "label": "",
+        "angle": 0,
+        "length_mm": 15.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 55.0,
+        "y_mm": 15.0,
+        "id": "rc",
+        "kind": "resistor",
+        "reference": "RC",
+        "value": "1kΩ",
+        "label": "",
+        "angle": 90,
+        "length_mm": 15.0,
+        "label_dx_mm": 14.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 55.0,
+        "y_mm": 60.0,
+        "id": "g1",
+        "kind": "ground",
+        "reference": "",
+        "value": "",
+        "label": "",
+        "angle": 0,
+        "length_mm": 15.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      }
+    ],
+    "junctions": [],
+    "wires": [
+      {
+        "id": "w1",
+        "start": {
+          "component_id": "r1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "q1",
+          "pin": "base",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w2",
+        "start": {
+          "component_id": "rc",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "q1",
+          "pin": "collector",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w3",
+        "start": {
+          "component_id": "q1",
+          "pin": "emitter",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "g1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      }
+    ],
+    "uncertainties": []
+  }
+}

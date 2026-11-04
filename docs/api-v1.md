@@ -8,14 +8,22 @@ API 位于 `/api/v1`；交互文档为 `/docs`，完整契约为 `/openapi.json`
 
 | 方法与路径 | 行为 |
 | --- | --- |
-| `POST /documents` | CanvasDocument v2 → 新文档；必填 `Idempotency-Key` |
+| `POST /documents` | CanvasDocument v3（兼容 v2） → 新文档；必填 `Idempotency-Key` |
 | `GET /documents?limit=100` | 最近更新的文档摘要；最多 200 份，不含正文 |
 | `GET /documents/{id}` | 读取正文、ID、版本及时间；响应含 `ETag` |
-| `PUT /documents/{id}` | 更新完整 CanvasDocument v2；必填 `If-Match: "版本号"` |
+| `PUT /documents/{id}` | 更新完整 CanvasDocument v3（兼容 v2）；必填 `If-Match: "版本号"` |
 
-创建和读取返回 `{id, revision, document, created_at, updated_at}`。保存成功递增 `revision`；缺少版本返回 428，版本过期返回 `412 document_changed`，不覆盖已有内容。外部客户端应先 GET，基于所读版本修改后 PUT；冲突需重新读取并合并或另存。同一实例另提供 `/mcp/`，MCP 工具复用这些文档和执行服务；连接配置见 [Codex / MCP 接入](mcp.md)。
+创建和读取返回 `{id, revision, document, created_at, updated_at}`。保存成功递增 `revision`；缺少版本返回 428，版本过期返回 `412 document_changed`，不覆盖已有内容。外部客户端应先 GET，基于所读版本修改后 PUT；冲突需重新读取并合并或另存。同一实例另提供 `/mcp/`，MCP 工具复用文档、预览及任务状态服务，不提供提交书写入口；连接配置见 [Codex / MCP 接入](mcp.md)。
 
 网页提供文档库及 `?document=doc_…` 分享入口；每秒检查新版本。无本地修改时更新本页，有未保存修改时保留本页并提示冲突。新建和导入产生独立文档，切换前先保存当前修改。文档更新不会改写已准备的方案或排队任务；修改后需重新准备并提交。
+
+## 原生电路文档
+
+v3 在现有文字、表格和矢量元素之外增加 `type: "circuit"`。v2 继续可读写，但不允许包含电路；网页读取后按 v3 保存，不批量改写历史数据库。能力接口返回 `[2, 3]`。
+
+结构和毫米坐标见 [MCP 电路说明](mcp.md#文字或照片生成电路图) 与 [完整 RC 元素](../examples/circuits/rc-lowpass.json)。渲染返回 `{element, svg, layout, diagnostics}`，`layout.components[].pins` 提供实际引脚坐标，`layout.wires[].points` 提供正交导线坐标。元件、连接点和导线 ID 唯一且引用必须存在；非法引脚与待确认项为 error，未连接引脚、重复编号、标注重叠为 warning。error 阻止方案准备，warning 保留预览和预计用时。
+
+两点测量只保留在当前画布视图，不进入 API 文档、撤销历史、SVG 或轨迹。
 
 ## 准备与书写
 
@@ -25,10 +33,13 @@ API 位于 `/api/v1`；交互文档为 `/docs`，完整契约为 `/openapi.json`
 | `GET /capabilities` | 文档版本、限制、允许的执行模式、会话期限 |
 | `GET /service` | 服务地址信息 |
 | `GET /fonts` | 本地数据集名称和覆盖数量；不含服务端绝对路径 |
-| `POST /documents/validate` | 校验 CanvasDocument v2 结构；不检查字库或设备 |
+| `POST /documents/validate` | 校验 CanvasDocument v3（兼容 v2） 结构；不检查字库或设备 |
 | `POST /documents/fit-table` | 文档和 `element_id` → 新表格与诊断；不保存内容 |
-| `POST /imports/svg` | `source`、`name` → 可插入文档的标准矢量 `element`；初始尺寸等比适配 A4 页边距，客户端可按当前纸张再次适配 |
-| `POST /plans` | CanvasDocument v2 → 不可变方案；不打开串口 |
+| `POST /imports/svg` | `source`、`name` → 可插入文档的标准矢量 `element`；保留原始毫米尺寸，客户端可主动调整位置和大小 |
+| `GET /circuits/symbols` | 固定电路符号目录、引脚与标准 |
+| `POST /circuits/layout` | CircuitElement → 自动排版后的 element、SVG、布局与诊断；不保存、不访问设备 |
+| `POST /circuits/render` | CircuitElement → 标准元素、SVG、布局与诊断；不保存、不访问设备 |
+| `POST /plans` | CanvasDocument v3（兼容 v2） → 不可变方案；不打开串口 |
 | `GET /plans/{id}` | 创建时的方案信息 |
 | `GET /plans/{id}/preview` | 与冻结轨迹对应的 SVG |
 | `POST /jobs` | `plan_id` 和必填 `mode: execute\|simulate` → 持久任务 |
@@ -74,7 +85,7 @@ Idempotency-Key: a-stable-key-for-this-submission
 
 ## 笔头定位
 
-文档可带 `pen_anchor: {"x_mm":35,"y_mm":45}`，表示这一个文档点对应当前物理笔头。拖动标志只更新文档中的定位点，文本框、表格、矢量图的位置保持原样；定位数据随文件保存并支持撤销/重做。
+文档可带 `pen_anchor: {"x_mm":35,"y_mm":45}`，表示这一个文档点对应当前物理笔头。网页笔尖标记常驻，新文档默认 `(0, 0)`；旧文档缺少定位时显示原点参考，只有拖动、输入或重置后才写入定位。拖动标志只更新文档中的定位点，文本框、表格、矢量图的位置保持原样；定位数据随文件保存并支持撤销/重做。
 
 空闲时实机提交读取 GRBL 工作坐标（支持 WPos 或 MPos−WCO，转换 `$13` 英寸报告），拒绝无法确认坐标或非 Idle 状态。已有任务时，新任务先持久排队，轮到执行且设备空闲后再读取坐标，不尝试读取运动中的笔头。接受和执行共用同一串口连接，执行前再次核对实际位置。轨迹以定位点为参考整体平移，按校准的轴映射检查实际写字盘范围，完成抬笔后回到本任务绑定时的工作坐标。普通书写也保留已验证连接，避免重新开串口影响坐标。
 
@@ -139,7 +150,7 @@ Content-Type: application/json
 
 ## 独立客户端
 
-先从网页导出 `.pygmalion.json` 文档，也可以直接生成符合 OpenAPI 的 CanvasDocument v2。示例直连指定服务，不读取系统代理；仅使用 HTTP，不依赖前端：
+先从网页导出 `.pygmalion.json` 文档，也可以直接生成符合 OpenAPI 的 CanvasDocument v3（兼容 v2）。示例直连指定服务，不读取系统代理；仅使用 HTTP，不依赖前端：
 
 ```bash
 poetry run python examples/v1_write.py 文档.pygmalion.json --receipt .cache/submit-1.json

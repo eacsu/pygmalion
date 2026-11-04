@@ -70,7 +70,7 @@ test("v1：默认字号、独立文本框与笔头定位在刷新和撤销后保
       JSON.parse(localStorage.getItem("pygmalion-document-v2")!),
     );
   const before = (await stored()).elements;
-  await page.getByRole("button", { name: "笔头定位", exact: true }).click();
+  await page.getByRole("button", { name: "笔头定位点", exact: true }).click();
   const marker = page.getByRole("button", { name: "笔头定位点", exact: true });
   await expect(marker).toBeVisible();
   await page.getByLabel("笔头 X", { exact: true }).fill("35");

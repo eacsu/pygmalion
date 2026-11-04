@@ -1,0 +1,105 @@
+{
+  "id": "circuit-rectifier",
+  "x_mm": 20.0,
+  "y_mm": 20.0,
+  "width_mm": 120.0,
+  "height_mm": 80.0,
+  "type": "circuit",
+  "name": "rectifier",
+  "scale": 1.0,
+  "font": "",
+  "label_size_mm": 3.0,
+  "circuit": {
+    "standard": "IEC",
+    "components": [
+      {
+        "x_mm": 15.0,
+        "y_mm": 50.0,
+        "id": "v1",
+        "kind": "ac_source",
+        "reference": "V1",
+        "value": "12V",
+        "label": "",
+        "angle": 270,
+        "length_mm": 30.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 30.0,
+        "y_mm": 20.0,
+        "id": "d1",
+        "kind": "diode",
+        "reference": "D1",
+        "value": "1N4148",
+        "label": "",
+        "angle": 0,
+        "length_mm": 25.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 75.0,
+        "y_mm": 20.0,
+        "id": "r1",
+        "kind": "resistor",
+        "reference": "R1",
+        "value": "1kΩ",
+        "label": "",
+        "angle": 90,
+        "length_mm": 30.0,
+        "label_dx_mm": 10.0,
+        "label_dy_mm": -5.0
+      }
+    ],
+    "junctions": [],
+    "wires": [
+      {
+        "id": "w1",
+        "start": {
+          "component_id": "v1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "d1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w2",
+        "start": {
+          "component_id": "d1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "r1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w3",
+        "start": {
+          "component_id": "r1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "v1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      }
+    ],
+    "uncertainties": []
+  }
+}

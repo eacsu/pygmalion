@@ -1,3 +1,4 @@
+import { useCircuitRender } from "./useCircuitRender";
 import {
   useEffect,
   useRef,
@@ -6,7 +7,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { formatDuration, estimateHelp } from "./timing";
-import { PaperRulers } from "./PaperRulers";
+import { CircuitHits, CircuitInspector } from "./CircuitEditor";
+import { MeasurementTool } from "./MeasurementTool";
 import { DefaultFontSize } from "./DefaultFontSize";
 import { PenAnchorMarker } from "./PenAnchorMarker";
 import { NumberField, NumberFieldsProvider } from "./NumberField";
@@ -117,9 +119,12 @@ function WorkbenchContent({
 }: WorkbenchProps) {
   const root = useRef<HTMLDivElement>(null);
   const d = m.document;
-  const inkBounds = previewBounds(d);
+  const inkBounds = m.imageBounds ?? previewBounds(d);
   const [selected, setSelected] = useState<string>();
   const [penSelected, setPenSelected] = useState(false);
+  const [measuring, setMeasuring] = useState(false);
+  const [circuitEditing, setCircuitEditing] = useState<string>();
+  const [circuitComponent, setCircuitComponent] = useState<string>();
   const [allSelected, setAllSelected] = useState<string[]>([]);
   const selectedCount = d.elements.filter((e) =>
     allSelected.includes(e.id),
@@ -167,12 +172,42 @@ function WorkbenchContent({
     table?.cells.filter((c) =>
       cellSelection.some((s) => s.row === c.row && s.col === c.col),
     ) || [];
+  const circuitElement = element?.type === "circuit" ? element : undefined;
+  const circuitRender = useCircuitRender(circuitElement);
   const activeCell = chosenCells[0];
-  const errors = m.preview?.diagnostics || [];
+  const penAnchor = d.pen_anchor ?? { x_mm: 0, y_mm: 0 };
+  const penX = viewport.view.x + penAnchor.x_mm * scale;
+  const penY = viewport.view.y + penAnchor.y_mm * scale;
+  const penObscured =
+    inspectorOpen &&
+    window.matchMedia("(max-width: 650px)").matches &&
+    penX >= viewport.view.width - Math.min(304, viewport.view.width);
+  const penOutside =
+    viewport.view.width > 0 &&
+    (penObscured ||
+      penX < 2 ||
+      penY < 20 ||
+      penX > viewport.view.width - 20 ||
+      penY > viewport.view.height - 2);
+  const cursorLabel = viewport.cursor
+    ? `${viewport.cursor.x.toFixed(2)}, ${viewport.cursor.y.toFixed(2)} mm`
+    : "0, 0 mm";
+  const errors = (m.preview?.diagnostics || []).filter(
+    (d) => d.severity === "error",
+  );
   const noFonts =
     !!fonts.data && !fonts.data.fonts.some((font) => font.available);
   const fontError =
-    noFonts && d.elements.some((element) => element.type !== "vector");
+    noFonts &&
+    d.elements.some(
+      (element) =>
+        element.type === "text" ||
+        element.type === "table" ||
+        (element.type === "circuit" &&
+          element.circuit.components.some(
+            (c) => c.reference || c.value || c.label,
+          )),
+    );
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if (
@@ -254,6 +289,7 @@ function WorkbenchContent({
     return () => document.removeEventListener("keydown", shortcut, true);
   }, [m, selected, allSelected]);
   function select(id?: string) {
+    setMeasuring(false);
     setPenSelected(false);
     m.endEdit();
     m.setComposing(false);
@@ -617,22 +653,12 @@ function WorkbenchContent({
           className="selection-tool"
           aria-label="选择工具"
           aria-pressed={!viewport.hand}
-          onClick={() => viewport.setHand(false)}
-        >
-          选择
-        </Button>
-        <Button
-          kind="ghost"
-          aria-pressed={!!d.pen_anchor}
-          disabled={m.locked}
           onClick={() => {
+            setMeasuring(false);
             viewport.setHand(false);
-            if (!d.pen_anchor)
-              m.change("pen_anchor", { x_mm: d.margin_mm, y_mm: d.margin_mm });
-            selectPen();
           }}
         >
-          笔头定位
+          选择
         </Button>
         <Button
           kind="ghost"
@@ -661,6 +687,18 @@ function WorkbenchContent({
           }}
         >
           重做
+        </Button>
+        <Button
+          kind="ghost"
+          aria-pressed={measuring && !viewport.hand}
+          onClick={() => {
+            m.endEdit();
+            setEditing(undefined);
+            viewport.setHand(false);
+            setMeasuring((v) => !v);
+          }}
+        >
+          测量
         </Button>
         <span className="tool-group-label view-group-label">视图</span>
         <span className="paper-size-label muted">
@@ -715,9 +753,10 @@ function WorkbenchContent({
           默认字号
         </Button>
         <div className="paper-coordinate-readout" aria-label="纸面坐标">
-          {viewport.cursor
-            ? `${viewport.cursor.x.toFixed(2)}, ${viewport.cursor.y.toFixed(2)} mm`
-            : "0, 0 mm"}
+          <span className="paper-coordinate-value" title={cursorLabel}>
+            <span>{cursorLabel.split(", ")[0]}, </span>
+            <span>{cursorLabel.split(", ")[1]}</span>
+          </span>
           <Button kind="ghost" aria-label="快捷键与帮助" onClick={onHelp}>
             帮助
           </Button>
@@ -742,11 +781,36 @@ function WorkbenchContent({
           }}
         >
           <div className="paper-viewport">
-            <PaperRulers
-              scale={scale}
-              view={viewport.view}
-              cursor={viewport.cursor}
-            />
+            {penOutside && (
+              <Button
+                className="pen-locator"
+                kind="ghost"
+                aria-label="显示笔头位置"
+                title={`${penObscured ? "笔头被属性面板遮挡" : "笔头在视野外"}：X ${penAnchor.x_mm} / Y ${penAnchor.y_mm} mm；只调整画布视图`}
+                onClick={() => {
+                  viewport.revealPoint(penAnchor.x_mm, penAnchor.y_mm);
+                  selectPen();
+                  if (window.matchMedia("(max-width: 650px)").matches)
+                    setInspectorOpen(false);
+                  requestAnimationFrame(() =>
+                    paper.current
+                      ?.querySelector<HTMLButtonElement>(".pen-anchor-marker")
+                      ?.focus({ preventScroll: true }),
+                  );
+                }}
+              >
+                {penObscured ? "笔头被面板遮住" : "笔头在视野外"} · 显示笔头
+              </Button>
+            )}
+            {measuring && !viewport.hand && (
+              <MeasurementTool
+                key={m.server.id}
+                paper={paper}
+                scale={scale}
+                view={viewport.view}
+                exit={() => setMeasuring(false)}
+              />
+            )}
             <div
               className={
                 "single-paper-stage canvas-stage" +
@@ -802,18 +866,18 @@ function WorkbenchContent({
                     }}
                   />
                 )}
-                {d.pen_anchor && (
-                  <PenAnchorMarker
-                    anchor={d.pen_anchor}
-                    width={width}
-                    height={height}
-                    scale={scale}
-                    selected={penSelected}
-                    locked={m.locked}
-                    select={selectPen}
-                    change={(point) => m.change("pen_anchor", point)}
-                  />
-                )}
+                <PenAnchorMarker
+                  key={m.server.id}
+                  anchor={penAnchor}
+                  bound={!!d.pen_anchor}
+                  width={width}
+                  height={height}
+                  scale={scale}
+                  selected={penSelected}
+                  locked={m.locked}
+                  select={selectPen}
+                  change={(point) => m.change("pen_anchor", point)}
+                />
                 {d.elements.map((original) => {
                   const el = drag?.id === original.id ? drag : original,
                     isSelected =
@@ -836,7 +900,32 @@ function WorkbenchContent({
                         height: el.height_mm * scale,
                       }}
                     >
-                      {el.type === "vector" ? (
+                      {el.type === "circuit" ? (
+                        selected === el.id &&
+                        circuitEditing === el.id &&
+                        !m.locked ? (
+                          <CircuitHits
+                            element={el}
+                            data={circuitRender.data}
+                            scale={scale}
+                            selected={circuitComponent}
+                            select={setCircuitComponent}
+                            change={m.replaceElement}
+                            exit={() => setCircuitEditing(undefined)}
+                          />
+                        ) : (
+                          <button
+                            className="text-hit-target vector-hit-target"
+                            disabled={m.locked}
+                            aria-label={"电路图：" + el.name}
+                            onClick={() => select(el.id)}
+                            onDoubleClick={() => {
+                              select(el.id);
+                              setCircuitEditing(el.id);
+                            }}
+                          />
+                        )
+                      ) : el.type === "vector" ? (
                         <button
                           className="text-hit-target vector-hit-target"
                           disabled={m.locked}
@@ -1117,7 +1206,7 @@ function WorkbenchContent({
           <div className="inspector-content">
             <div className="inspector-identity">
               <h2>
-                {penSelected && d.pen_anchor
+                {penSelected
                   ? "笔头定位"
                   : selectedCount
                     ? `已选 ${selectedCount} 个元素`
@@ -1167,32 +1256,34 @@ function WorkbenchContent({
               defaults={m.defaults}
               expanded={!element && !penSelected}
             />
-            {penSelected && d.pen_anchor && (
+            {penSelected && (
               <fieldset key={`pen:${m.inputEpoch}`} disabled={m.locked}>
                 <div className="property-heading">
                   <h3>笔头对应点</h3>
                   <span>纸面坐标</span>
                 </div>
                 <p className="muted">
-                  实际笔头保持不动。将标志放到内容中与笔头对应的位置，整份内容按此对位。
+                  {d.pen_anchor
+                    ? "实际笔头保持不动。将标志放到内容中与笔头对应的位置，整份内容按此对位。"
+                    : "此旧文档尚未绑定笔头，标记暂显示在纸面原点。拖动、输入坐标或重置到左上角后保存定位。"}
                 </p>
                 <div className="dimension-grid">
                   <NumberField
                     label="笔头 X"
-                    value={d.pen_anchor.x_mm}
+                    value={penAnchor.x_mm}
                     min={-Infinity}
                     max={Infinity}
                     change={(value) =>
-                      m.change("pen_anchor", { ...d.pen_anchor!, x_mm: value })
+                      m.change("pen_anchor", { ...penAnchor, x_mm: value })
                     }
                   />
                   <NumberField
                     label="笔头 Y"
-                    value={d.pen_anchor.y_mm}
+                    value={penAnchor.y_mm}
                     min={-Infinity}
                     max={Infinity}
                     change={(value) =>
-                      m.change("pen_anchor", { ...d.pen_anchor!, y_mm: value })
+                      m.change("pen_anchor", { ...penAnchor, y_mm: value })
                     }
                   />
                 </div>
@@ -1202,11 +1293,11 @@ function WorkbenchContent({
                 <Button
                   kind="ghost"
                   onClick={() => {
-                    m.change("pen_anchor", null);
+                    m.change("pen_anchor", { x_mm: 0, y_mm: 0 });
                     select();
                   }}
                 >
-                  取消笔头定位
+                  重置到左上角
                 </Button>
               </fieldset>
             )}
@@ -1241,20 +1332,28 @@ function WorkbenchContent({
                           }[key]
                         }
                         value={element[key]}
-                        max={Infinity}
+                        max={
+                          element.type === "circuit" &&
+                          (key === "width_mm" || key === "height_mm")
+                            ? (element[key] * 20) / element.scale
+                            : Infinity
+                        }
                         min={
                           key === "width_mm" || key === "height_mm"
-                            ? element.type === "vector"
-                              ? 0.001 *
-                                (element.lock_aspect
-                                  ? Math.max(
-                                      1,
-                                      key === "width_mm"
-                                        ? element.width_mm / element.height_mm
-                                        : element.height_mm / element.width_mm,
-                                    )
-                                  : 1)
-                              : 0.5
+                            ? element.type === "circuit"
+                              ? (element[key] * 0.05) / element.scale
+                              : element.type === "vector"
+                                ? 0.001 *
+                                  (element.lock_aspect
+                                    ? Math.max(
+                                        1,
+                                        key === "width_mm"
+                                          ? element.width_mm / element.height_mm
+                                          : element.height_mm /
+                                              element.width_mm,
+                                      )
+                                    : 1)
+                                : 0.5
                             : -Infinity
                         }
                         change={(v) =>
@@ -1271,6 +1370,27 @@ function WorkbenchContent({
                       />
                     ))}
                   </div>
+                  {element.type === "circuit" && (
+                    <CircuitInspector
+                      element={element}
+                      editing={circuitEditing === element.id}
+                      selected={circuitComponent}
+                      data={circuitRender.data}
+                      error={circuitRender.error}
+                      retry={circuitRender.retry}
+                      change={m.replaceElement}
+                      enter={() => {
+                        setCircuitEditing(element.id);
+                        setCircuitComponent(
+                          (v) => v ?? element.circuit.components[0]?.id,
+                        );
+                      }}
+                      exit={() => setCircuitEditing(undefined)}
+                      select={setCircuitComponent}
+                      begin={m.beginEdit}
+                      end={() => m.endEdit()}
+                    />
+                  )}
                   {element.type === "vector" && (
                     <>
                       <label className="compact-field vector-name">
@@ -1354,7 +1474,7 @@ function WorkbenchContent({
                       )}
                     </>
                   )}
-                  {element.type !== "vector" && (
+                  {(element.type === "text" || element.type === "table") && (
                     <>
                       <div className="property-heading">
                         <h3>文字</h3>
@@ -1644,7 +1764,7 @@ function WorkbenchContent({
                     </div>
                   )}
                   <div className="table-actions">
-                    {element.type !== "vector" && (
+                    {(element.type === "text" || element.type === "table") && (
                       <Button
                         kind="ghost"
                         onClick={() => {
@@ -1677,9 +1797,9 @@ function WorkbenchContent({
                   </div>
                 </fieldset>
               </>
-            ) : penSelected && d.pen_anchor ? null : (
+            ) : penSelected ? null : (
               <p className="muted inspector-empty">
-                选择纸面上的文本框、表格或矢量图，调整位置和尺寸。
+                选择纸面上的文本框、表格、矢量图或电路，调整位置和尺寸。
               </p>
             )}
           </div>

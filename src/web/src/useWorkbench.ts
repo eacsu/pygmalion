@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   api,
   submitPlan,
@@ -153,7 +159,7 @@ export function useWorkbench({ mode, jobs, notify, refresh }: Props) {
   }, [server.id]);
   const dirty = !server.synced;
   const locked = !server.ready || !!server.opening || writing;
-  const { preview, error, previewUrl } = usePaperPreview(
+  const { preview, error, previewUrl, imageBounds } = usePaperPreview(
     document,
     generation,
     revision,
@@ -170,7 +176,7 @@ export function useWorkbench({ mode, jobs, notify, refresh }: Props) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [server.synced]);
   const lockedRef = useRef(locked);
-  useEffect(() => {
+  useLayoutEffect(() => {
     lockedRef.current = locked;
   }, [locked]);
   const [fitting, setFitting] = useState(false);
@@ -224,7 +230,8 @@ export function useWorkbench({ mode, jobs, notify, refresh }: Props) {
   }
   function replaceText(id: string, text: string, row?: number, col?: number) {
     const element = latest.current.elements.find((item) => item.id === id);
-    if (!element || element.type === "vector") return;
+    if (!element || (element.type !== "text" && element.type !== "table"))
+      return;
     replaceElement(
       element.type === "text"
         ? { ...element, text }
@@ -355,7 +362,9 @@ export function useWorkbench({ mode, jobs, notify, refresh }: Props) {
             font_size_mm: defaults.data?.font_size_mm,
           })
         : readDocument(JSON.parse(text));
-      if (next.elements.some((e) => e.type === "vector"))
+      if (
+        next.elements.some((e) => e.type === "vector" || e.type === "circuit")
+      )
         await api("/api/v1/documents/validate", next);
       if (latest.current !== baseline)
         throw new Error("文档已变化，请重新打开文件");
@@ -490,6 +499,7 @@ export function useWorkbench({ mode, jobs, notify, refresh }: Props) {
     dirty,
     preview,
     previewUrl,
+    imageBounds,
     error,
     canWrite,
     writing,

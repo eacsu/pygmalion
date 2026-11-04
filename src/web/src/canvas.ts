@@ -1,3 +1,4 @@
+import { validateCircuit, type CircuitElement } from "./circuit";
 export interface TextStyle {
   font: string;
   font_size_mm: number;
@@ -44,9 +45,15 @@ export interface VectorElement extends Geometry {
   fill_spacing_mm?: number;
   fill_angle_deg?: number;
 }
-export type PaperElement = TextBox | Table | VectorElement;
+export type PaperElement = TextBox | Table | VectorElement | CircuitElement;
 export function elementName(e: PaperElement) {
-  return e.type === "text" ? "文本框" : e.type === "table" ? "表格" : "矢量图";
+  return e.type === "text"
+    ? "文本框"
+    : e.type === "table"
+      ? "表格"
+      : e.type === "circuit"
+        ? "电路图"
+        : "矢量图";
 }
 export function newVector(
   d: WritingDocument,
@@ -72,7 +79,7 @@ export function newVector(
   };
 }
 export interface WritingDocument {
-  version: 2;
+  version: 3;
   name: string;
   paper: "A4" | "A5";
   margin_mm: number;
@@ -80,6 +87,7 @@ export interface WritingDocument {
   pen_anchor?: { x_mm: number; y_mm: number } | null;
 }
 export interface Diagnostic {
+  severity: "error" | "warning";
   element_id: string;
   row?: number;
   col?: number;
@@ -87,11 +95,12 @@ export interface Diagnostic {
   message: string;
 }
 export const blank: WritingDocument = {
-  version: 2,
+  version: 3,
   name: "未命名文档",
   paper: "A4",
   margin_mm: 20,
   elements: [],
+  pen_anchor: { x_mm: 0, y_mm: 0 },
 };
 export const defaultStyle: TextStyle = {
   font: "",
@@ -189,12 +198,21 @@ export function resizeElement(
   width: number,
   height: number,
 ): PaperElement {
-  if (e.type === "vector" && e.lock_aspect) {
-    const ratio =
+  if (e.type === "circuit" || (e.type === "vector" && e.lock_aspect)) {
+    let ratio =
       width !== e.width_mm ? width / e.width_mm : height / e.height_mm;
+    if (e.type === "circuit")
+      ratio = Math.max(0.05 / e.scale, Math.min(20 / e.scale, ratio));
     width = e.width_mm * ratio;
     height = e.height_mm * ratio;
   }
+  if (e.type === "circuit")
+    return {
+      ...e,
+      width_mm: width,
+      height_mm: height,
+      scale: (e.scale * width) / e.width_mm,
+    };
   return e.type !== "table"
     ? { ...e, width_mm: width, height_mm: height }
     : {
@@ -371,7 +389,7 @@ export function readDocument(raw: unknown): WritingDocument {
   }
   const d = raw as WritingDocument;
   if (
-    d.version !== 2 ||
+    ![2, 3].includes(d.version) ||
     !string(d.name, 120) ||
     !["A4", "A5"].includes(d.paper) ||
     !finite(d.margin_mm, 0, 60) ||
@@ -395,12 +413,12 @@ export function readDocument(raw: unknown): WritingDocument {
       !string(e.id, 120) ||
       !e.id ||
       ids.has(e.id) ||
-      !["text", "table", "vector"].includes(e.type) ||
+      !["text", "table", "vector", "circuit"].includes(e.type) ||
       !Number.isFinite(e.x_mm) ||
       !Number.isFinite(e.y_mm) ||
       !finite(e.width_mm, 0.001, Infinity) ||
       !finite(e.height_mm, 0.001, Infinity) ||
-      (e.type !== "vector" &&
+      ((e.type === "text" || e.type === "table") &&
         (!string(e.font, 240) ||
           !finite(e.font_size_mm, 4, 40) ||
           !finite(e.char_gap_mm, 0, 20) ||
@@ -408,7 +426,10 @@ export function readDocument(raw: unknown): WritingDocument {
     )
       throw new Error("元素内容或尺寸不正确");
     ids.add(e.id);
-    if (e.type === "vector") {
+    if (e.type === "circuit") {
+      if (Number(d.version) === 2) throw new Error("电路图需要文档版本 3");
+      validateCircuit(e);
+    } else if (e.type === "vector") {
       if (
         !string(e.name, 120) ||
         typeof e.lock_aspect !== "boolean" ||
@@ -497,7 +518,7 @@ export function readDocument(raw: unknown): WritingDocument {
   }
   if (vectorSize > 1000000) throw new Error("整页矢量路径数据不能超过 1 MB");
   if (count > 20000) throw new Error("整页文字不能超过20000字符");
-  return structuredClone(d);
+  return structuredClone({ ...d, version: 3 });
 }
 
 /** 预览与服务端使用相同毫米范围，纸外内容保留原位置。 */

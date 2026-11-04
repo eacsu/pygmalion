@@ -6,6 +6,7 @@ import copy
 import math
 
 from ..config import CONFIG, ROOT
+from ..drawing.circuit import render_circuit
 from ..drawing.svg import vector_strokes
 from ..fonts import registry
 from ..machine import gcode
@@ -15,6 +16,7 @@ from ..schemas.canvas import (
     TextBox,
     Vector,
 )
+from ..schemas.circuit import CircuitElement
 from .layout import char_width_units
 from .models import PlacedGlyph, Poem, Stroke
 from .page import page_config
@@ -162,7 +164,18 @@ def prepare_canvas(
     doc: CanvasDocument, *, pen_position: tuple[float, float] | None = None
 ) -> tuple[Prepared, bool]:
     if any(
-        element.type != "vector" for element in doc.elements
+        element.type in ("text", "table")
+        or (
+            isinstance(element, CircuitElement)
+            and (
+                any(
+                    c.reference or c.value or c.label
+                    for c in element.circuit.components
+                )
+                or any(j.label for j in element.circuit.junctions)
+            )
+        )
+        for element in doc.elements
     ) and not registry.discover(ROOT):
         raise ValueError("未找到书写字库，请安装字体数据集或检查字体目录配置后重试")
     page = page_config(doc)
@@ -178,6 +191,12 @@ def prepare_canvas(
     strokes, missing, diagnostics, layouts = [], [], [], []
     glyph_count = 0
     for element in doc.elements:
+        if isinstance(element, CircuitElement):
+            result = render_circuit(element)
+            strokes.extend(result.strokes)
+            diagnostics.extend(result.diagnostics)
+            layouts.append(result.layout)
+            continue
         if isinstance(element, Vector):
             paths = vector_strokes(element)
             strokes.extend(paths)
@@ -256,10 +275,26 @@ def prepare_canvas(
             )
         layouts.append({"element_id": element.id, "regions": region_layouts})
     # 纸张仅作参考背景，预览范围包含全部内容；机器坐标不裁剪。
-    left = min([0.0] + [e.x_mm for e in doc.elements])
-    top = min([0.0] + [e.y_mm for e in doc.elements])
-    right = max([page.width_mm] + [e.x_mm + e.width_mm for e in doc.elements])
-    bottom = max([page.height_mm] + [e.y_mm + e.height_mm for e in doc.elements])
+    left = min(
+        [0.0]
+        + [e.x_mm for e in doc.elements]
+        + [x for s in strokes for x, y in s.points]
+    )
+    top = min(
+        [0.0]
+        + [e.y_mm for e in doc.elements]
+        + [y for s in strokes for x, y in s.points]
+    )
+    right = max(
+        [page.width_mm]
+        + [e.x_mm + e.width_mm for e in doc.elements]
+        + [x for s in strokes for x, y in s.points]
+    )
+    bottom = max(
+        [page.height_mm]
+        + [e.y_mm + e.height_mm for e in doc.elements]
+        + [y for s in strokes for x, y in s.points]
+    )
     svg = strokes_to_svg(strokes, page, color="#252a2a", bg="none")
     svg = svg.replace(
         f'viewBox="0 0 {page.width_mm:g} {page.height_mm:g}"',
@@ -279,7 +314,7 @@ def prepare_canvas(
         requested_size=8,
         missing=missing,
         machine_snapshot=copy.deepcopy(CONFIG["machine"]),
-        blocked=bool(diagnostics),
+        blocked=any(d.get("severity", "error") == "error" for d in diagnostics),
         layout=layouts,
         diagnostics=diagnostics,
     )

@@ -6,7 +6,11 @@ type PaperPreview = Preview & { overflow: boolean };
 type PreviewState = {
   scope: string;
   result?: { key: string; data?: PaperPreview; error?: string };
-  image?: { key: string; url: string };
+  image?: {
+    key: string;
+    url: string;
+    bounds: { left: number; top: number; width: number; height: number };
+  };
 };
 
 function layoutKey(document: WritingDocument) {
@@ -87,6 +91,25 @@ export function usePaperPreview(
         });
         if (!response.ok) throw new Error("笔画预览读取失败");
         const svg = await response.text();
+        const viewBox = new DOMParser()
+          .parseFromString(svg, "image/svg+xml")
+          .documentElement.getAttribute("viewBox");
+        const values = viewBox?.trim().split(/[ ,]+/).map(Number);
+        if (
+          !values ||
+          values.length !== 4 ||
+          !values.every(Number.isFinite) ||
+          values[2] <= 0 ||
+          values[3] <= 0
+        )
+          throw new Error("预览坐标范围不正确");
+        const bounds = {
+          left: values[0],
+          top: values[1],
+          width: values[2],
+          height: values[3],
+        };
+
         const data: PaperPreview = {
           plan_id: plan.id,
           estimated_duration_seconds: plan.estimated_duration_seconds,
@@ -131,7 +154,7 @@ export function usePaperPreview(
         loader = undefined;
         setState({
           scope,
-          image: { key: requestKey, url },
+          image: { key: requestKey, url, bounds },
           result: { key: requestKey, data },
         });
       } catch (error) {
@@ -164,5 +187,10 @@ export function usePaperPreview(
     state.scope === scope && state.result?.key === requestKey
       ? state.result
       : undefined;
-  return { preview: result?.data, error: result?.error, previewUrl: shownUrl };
+  return {
+    preview: result?.data,
+    error: result?.error,
+    previewUrl: shownUrl,
+    imageBounds: state.scope === scope ? state.image?.bounds : undefined,
+  };
 }

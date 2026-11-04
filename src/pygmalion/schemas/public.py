@@ -5,6 +5,7 @@ from typing import Annotated, Generic, Literal, TypeVar
 from pydantic import Field, JsonValue, RootModel, model_validator
 
 from .canvas import CanvasDocument, EditorDefaults, Model, Table, Vector
+from .circuit import CircuitElement, Symbol
 
 Status = Literal[
     "queued", "running", "cancelling", "succeeded", "cancelled", "failed", "interrupted"
@@ -39,7 +40,7 @@ class Health(Model):
 
 
 class Capabilities(Model):
-    document_versions: list[int] = Field(default_factory=lambda: [2])
+    document_versions: list[int] = Field(default_factory=lambda: [2, 3])
     allowed_job_modes: list[Mode]
     max_active_jobs: int = 1
     max_elements: int = 100
@@ -82,6 +83,26 @@ class Diagnostic(Model):
     row: int | None = None
     col: int | None = None
     details: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class CircuitSymbol(Model):
+    kind: Symbol
+    name: str
+    pins: list[str]
+    default_length_mm: float
+
+
+class CircuitSymbols(Model):
+    symbols: list[CircuitSymbol]
+    units: Literal["mm"] = "mm"
+    standards: list[Literal["IEC", "ANSI"]]
+
+
+class CircuitRender(Model):
+    element: CircuitElement
+    svg: str
+    layout: dict[str, JsonValue]
+    diagnostics: list[Diagnostic]
 
 
 class ValidationResult(Model):

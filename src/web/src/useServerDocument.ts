@@ -144,7 +144,7 @@ export function useServerDocument(
       blocked.current = false;
       latest.current = readDocument(value.document);
       remember(value);
-      receiver.current(value.document);
+      receiver.current(latest.current);
     },
     [remember],
   );

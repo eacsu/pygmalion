@@ -248,6 +248,19 @@ export function usePaperViewport(width: number, height: number) {
       y = (clientY - rect.top) / scale;
     setCursor({ x, y });
   }
+  function revealPoint(x: number, y: number) {
+    const host = stage.current,
+      sheet = paper.current;
+    if (!host || !sheet) return;
+    host.scrollLeft = 0;
+    host.scrollTop = 0;
+    const bounds = host.getBoundingClientRect(),
+      rect = sheet.getBoundingClientRect();
+    const dx = host.clientWidth / 2 - (rect.left - bounds.left + x * scale);
+    const dy = host.clientHeight / 2 - (rect.top - bounds.top + y * scale);
+    setPan((old) => ({ x: old.x + dx, y: old.y + dy }));
+    setHand(false);
+  }
   return {
     stage,
     paper,
@@ -261,6 +274,7 @@ export function usePaperViewport(width: number, height: number) {
     view,
     cursor,
     point,
+    revealPoint,
     clearCursor: () => {
       clientPoint.current = undefined;
       setCursor(undefined);

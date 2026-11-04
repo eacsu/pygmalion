@@ -3,25 +3,16 @@
 import math
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
-
-class Model(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, strict=True)
+from .base import Element, Model
+from .circuit import CircuitElement
 
 
 class EditorDefaults(Model):
     """新建元素的应用默认值，不参与已有文档的渲染。"""
 
     font_size_mm: float = Field(default=8, ge=4, le=40)
-
-
-class Element(Model):
-    id: str = Field(min_length=1, max_length=120)
-    x_mm: float = 20
-    y_mm: float = 20
-    width_mm: float = Field(default=100, gt=0)
-    height_mm: float = Field(default=50, gt=0)
 
 
 class TextElement(Element):
@@ -123,7 +114,9 @@ class SvgImportRequest(Model):
     name: str = Field(default="矢量图", max_length=120)
 
 
-CanvasElement = Annotated[TextBox | Table | Vector, Field(discriminator="type")]
+CanvasElement = Annotated[
+    TextBox | Table | Vector | CircuitElement, Field(discriminator="type")
+]
 
 
 class PenAnchor(Model):
@@ -134,7 +127,7 @@ class PenAnchor(Model):
 
 
 class CanvasDocument(Model):
-    version: Literal[2] = 2
+    version: Literal[2, 3] = 3
     name: str = Field(default="未命名文档", max_length=120)
     paper: Literal["A4", "A5"] = "A4"
     margin_mm: float = Field(default=20, ge=0, le=60)
@@ -143,6 +136,10 @@ class CanvasDocument(Model):
 
     @model_validator(mode="after")
     def valid_document(self):
+        if self.version == 2 and any(
+            isinstance(e, CircuitElement) for e in self.elements
+        ):
+            raise ValueError("电路元素需要文档版本 3")
         if len({e.id for e in self.elements}) != len(self.elements):
             raise ValueError("元素 ID 不能重复")
         if (

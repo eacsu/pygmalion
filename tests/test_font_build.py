@@ -49,7 +49,7 @@ def test_extended_dataset_preserves_base_and_writes_mixed_text(tmp_path, monkeyp
             elements=[
                 TextBox(
                     id="mixed",
-                    text="甲Abc0123，。±℃￥",
+                    text="甲Abc0123，。±℃￥10kΩ 100μF 1µF",
                     font="cjk-medians-plus",
                     font_size_mm=4,
                 )

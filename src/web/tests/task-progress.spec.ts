@@ -97,3 +97,43 @@ test("旧任务没有估算数据时不编造倒计时，停止中只显示等�
   status = "cancelling";
   await expect(page.locator(".task-time")).toContainText("等待停止确认");
 });
+
+test("停止确认后隐藏发送进度与预估，保留停止结果", async ({ page }) => {
+  let status = "running";
+  let submitted = false;
+  const job = () => ({
+    id: 9901,
+    status,
+    mode: "simulate",
+    title: "停止测试",
+    started_at: new Date(Date.now() - 5000).toISOString(),
+    finished_at: status === "cancelled" ? new Date().toISOString() : null,
+    sent: 42,
+    total: 100,
+    percent: 42,
+    estimated_duration_seconds: 100,
+  });
+  await page.route("**/api/v1/jobs?*", (route) =>
+    route.fulfill({ json: { data: submitted ? [job()] : [] } }),
+  );
+  await page.route("**/api/v1/jobs", (route) => {
+    submitted = true;
+    return route.fulfill({ json: job() });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "添加表格", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "开始书写", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "开始书写", exact: true }).click();
+  await expect(
+    page.getByRole("progressbar", { name: "指令发送进度" }),
+  ).toBeVisible();
+  status = "cancelled";
+  await expect(
+    page.getByRole("progressbar", { name: "指令发送进度" }),
+  ).toHaveCount(0);
+  await expect(page.locator(".task-progress-title")).toContainText("已中止");
+  await expect(page.locator(".task-time")).not.toContainText("预计");
+  await page.screenshot({ path: "/tmp/pygmalion-stopped-progress.png" });
+});

@@ -21,11 +21,14 @@ from ...schemas.canvas import (
     FitRequest,
     SvgImportRequest,
 )
+from ...schemas.circuit import CircuitElement
 from ...schemas.public import (
     Backup,
     CalibrationPatch,
     CalibrationSettings,
     Capabilities,
+    CircuitRender,
+    CircuitSymbols,
     Collection,
     Command,
     ConfigResource,
@@ -57,7 +60,7 @@ from ...schemas.public import (
     StoredDocument,
     ValidationResult,
 )
-from ...servicer import configuration, documents, system, workbench
+from ...servicer import circuits, configuration, documents, system, workbench
 from ...servicer.public_errors import PublicError
 from ..dependencies import get_context
 
@@ -137,6 +140,21 @@ def validate(data: CanvasDocument):
 def fit(data: FitRequest):
     result = workbench.fit_document_table(data)
     return {"element": result["table"], "diagnostics": result["diagnostics"]}
+
+
+@router.get("/circuits/symbols", response_model=CircuitSymbols)
+def circuit_symbols():
+    return circuits.symbols()
+
+
+@router.post("/circuits/render", response_model=CircuitRender)
+def circuit_render(data: CircuitElement):
+    return circuits.render(data)
+
+
+@router.post("/circuits/layout", response_model=CircuitRender)
+def circuit_layout(data: CircuitElement):
+    return circuits.layout(data)
 
 
 @router.post("/imports/svg", response_model=ImportResult)

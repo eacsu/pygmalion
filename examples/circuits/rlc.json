@@ -1,0 +1,133 @@
+{
+  "id": "circuit-rlc",
+  "x_mm": 20.0,
+  "y_mm": 20.0,
+  "width_mm": 120.0,
+  "height_mm": 80.0,
+  "type": "circuit",
+  "name": "rlc",
+  "scale": 1.0,
+  "font": "",
+  "label_size_mm": 3.0,
+  "circuit": {
+    "standard": "IEC",
+    "components": [
+      {
+        "x_mm": 15.0,
+        "y_mm": 55.0,
+        "id": "v1",
+        "kind": "ac_source",
+        "reference": "V1",
+        "value": "1V",
+        "label": "",
+        "angle": 270,
+        "length_mm": 35.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 25.0,
+        "y_mm": 20.0,
+        "id": "r1",
+        "kind": "resistor",
+        "reference": "R1",
+        "value": "1kΩ",
+        "label": "",
+        "angle": 0,
+        "length_mm": 20.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 50.0,
+        "y_mm": 20.0,
+        "id": "l1",
+        "kind": "inductor",
+        "reference": "L1",
+        "value": "10mH",
+        "label": "",
+        "angle": 0,
+        "length_mm": 20.0,
+        "label_dx_mm": 0.0,
+        "label_dy_mm": -5.0
+      },
+      {
+        "x_mm": 85.0,
+        "y_mm": 20.0,
+        "id": "c1",
+        "kind": "capacitor",
+        "reference": "C1",
+        "value": "100nF",
+        "label": "",
+        "angle": 90,
+        "length_mm": 35.0,
+        "label_dx_mm": 10.0,
+        "label_dy_mm": -5.0
+      }
+    ],
+    "junctions": [],
+    "wires": [
+      {
+        "id": "w1",
+        "start": {
+          "component_id": "v1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "r1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w2",
+        "start": {
+          "component_id": "r1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "l1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w3",
+        "start": {
+          "component_id": "l1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "c1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      },
+      {
+        "id": "w4",
+        "start": {
+          "component_id": "c1",
+          "pin": "end",
+          "junction_id": null
+        },
+        "end": {
+          "component_id": "v1",
+          "pin": "start",
+          "junction_id": null
+        },
+        "waypoints": [],
+        "first_axis": "horizontal"
+      }
+    ],
+    "uncertainties": []
+  }
+}

@@ -1029,7 +1029,18 @@ select option {
   touch-action: none;
 }
 .pen-anchor-marker.selected svg {
-  stroke-width: 2;
+  stroke-width: 2.5;
+}
+.pen-anchor-marker svg {
+  overflow: visible;
+}
+.console-v1 .pen-locator.button.ghost {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
 .pen-anchor-marker:active {
   cursor: grabbing;
@@ -1161,65 +1172,22 @@ select option {
   outline-offset: -2px;
 }
 
-/* 刻度尺与纸面共用毫米坐标，固定在可滚动视口的边缘。 */
+/* 工作视口保留完整空间；毫米测量按需覆盖。 */
 .paper-viewport {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  grid-template-rows: 24px minmax(0, 1fr);
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   flex: 1;
   overflow: hidden;
 }
 .paper-viewport > .canvas-stage {
-  grid-column: 2;
-  grid-row: 2;
+  grid-column: 1;
+  grid-row: 1;
   min-width: 0;
   min-height: 0;
   padding: 20px;
-}
-.ruler-corner {
-  grid-column: 1;
-  grid-row: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  color: var(--muted);
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-.paper-ruler {
-  display: block;
-  overflow: hidden;
-  min-width: 0;
-  min-height: 0;
-  background: var(--background);
-  color: var(--muted);
-}
-.paper-ruler.horizontal {
-  grid-column: 2;
-  grid-row: 1;
-  border-bottom: 1px solid var(--line);
-}
-.paper-ruler.vertical {
-  grid-column: 1;
-  grid-row: 2;
-  border-right: 1px solid var(--line);
-}
-.paper-ruler line {
-  stroke: currentColor;
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-.paper-ruler text {
-  fill: currentColor;
-  stroke: none;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-.paper-ruler .ruler-cursor {
-  stroke: var(--text);
-  stroke-width: 1.5;
 }
 .paper-coordinate-readout {
   font-variant-numeric: tabular-nums;
@@ -1233,7 +1201,7 @@ select option {
 }
 
 .canvas-stage {
-  overflow: scroll;
+  overflow: auto;
 }
 .canvas-stage.hand-tool,
 .canvas-stage.hand-tool * {
@@ -1257,11 +1225,6 @@ select option {
 /* 纸面与操作色分离，选择框不会改变真实笔画。 */
 .canvas-stage {
   background: var(--surface-subtle);
-}
-.paper-ruler,
-.ruler-corner {
-  background: var(--sidebar);
-  border-color: transparent;
 }
 .paper-element.selected {
   outline-color: var(--editor-interaction);
@@ -1578,6 +1541,8 @@ select option {
     gap: 3px;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 0;
     padding: 18px 12px 0;
     border-bottom: 0;
     border-right: 1px solid var(--line);
@@ -1923,4 +1888,161 @@ select option {
 .console-v1 .task-inner > .button {
   width: auto;
   white-space: nowrap;
+}
+
+/* 按需测量占据视口，不占用纸面或永久刻度空间。 */
+.measurement-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 8;
+  cursor: crosshair;
+  touch-action: none;
+  outline: none;
+}
+.measurement-line {
+  fill: none;
+  stroke: var(--editor-interaction);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.measurement-overlay circle {
+  fill: var(--background);
+  stroke: var(--editor-interaction);
+  stroke-width: 1.5;
+  cursor: move;
+}
+.measurement-overlay .measurement-hit {
+  fill: transparent;
+  stroke: none;
+}
+.measurement-overlay g:focus-visible {
+  outline: none;
+}
+.measurement-overlay g:focus-visible circle:last-child {
+  stroke-width: 3;
+}
+.measurement-overlay text {
+  fill: var(--text);
+  stroke: var(--background);
+  stroke-width: 4px;
+  paint-order: stroke;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.circuit-hits {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.circuit-component-hit {
+  position: absolute;
+  border: 1px solid transparent;
+  background: transparent;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: move;
+  padding: 0;
+}
+.circuit-component-hit:hover,
+.circuit-component-hit.selected {
+  border-color: var(--editor-interaction);
+  background: color-mix(in srgb, var(--editor-interaction) 8%, transparent);
+}
+.circuit-component-hit:focus-visible {
+  outline: 2px solid var(--editor-interaction);
+  outline-offset: 2px;
+}
+.circuit-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 12px;
+  background: var(--background);
+  color: var(--muted);
+}
+.circuit-inspector {
+  display: grid;
+  gap: 12px;
+  margin-block: 16px;
+}
+.circuit-component-properties {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+.circuit-component-properties .compact-field > input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.circuit-component-properties .compact-field > input:hover {
+  border-color: var(--line);
+}
+.circuit-component-properties .compact-field > input:focus-visible {
+  outline: 2px solid var(--editor-interaction);
+  outline-offset: 1px;
+}
+.circuit-confirm {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.circuit-confirm label {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+.circuit-target {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: var(--editor-interaction);
+  stroke-width: 3;
+  opacity: 0.65;
+  pointer-events: none;
+}
+.circuit-diagnostic {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.paper-coordinate-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.paper-coordinate-readout > .button {
+  flex-shrink: 0;
+}
+@media (min-width: 1001px) {
+  .paper-coordinate-value {
+    flex: 1;
+  }
+  .paper-coordinate-value > span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }

@@ -68,7 +68,7 @@ def discover(root: Path) -> list[FontInfo]:
             FontInfo(
                 file=font_id + ".parquet",
                 dataset_path=path,
-                label={"cjk-medians": "宋体", DEFAULT_FONT: "中文单线·扩展"}.get(
+                label={"cjk-medians": "宋体", DEFAULT_FONT: "中文单线·扩展", "stroke2font-xingkai-179": "行楷·实验（179字形）", "xingyi-centerline": "行意单线·实验（轮廓转换）", "xingyi-centerline-fast": "行意单线·优化版"}.get(
                     name, name
                 ),
                 chars=len(source),

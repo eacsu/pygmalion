@@ -18,6 +18,9 @@ dependencies = [
     "svgelements (>=1.9.6,<2)",
     "defusedxml (>=0.7.1,<1)",
     "mcp (>=1.26,<2)",
+    "schemdraw (>=0.23,<0.24)",
+    "fonttools (>=4.60,<5)",
+    "pillow (>=11,<13)",
 ]
 
 [tool.poetry]
