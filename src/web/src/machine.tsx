@@ -1,3 +1,4 @@
+import { randomId } from "./uuid";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import {
   api,
@@ -1017,7 +1018,7 @@ function SettingsEditor({
             const session = await idempotent<PublicSession>(
               "/api/v1/machine/control-sessions",
               {},
-              crypto.randomUUID(),
+              randomId(),
             );
             try {
               const result = await deviceOperation(

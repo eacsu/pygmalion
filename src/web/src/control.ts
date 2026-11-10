@@ -1,3 +1,4 @@
+import { randomId } from "./uuid";
 import {
   api,
   ApiError,
@@ -38,7 +39,7 @@ export class MachineControl {
     this.connecting = idempotent<PublicSession>(
       "/api/v1/machine/control-sessions",
       {},
-      crypto.randomUUID(),
+      randomId(),
     )
       .then((session) => {
         if (generation !== this.generation) {

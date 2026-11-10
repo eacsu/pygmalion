@@ -39,6 +39,24 @@ Codex 可通过同一实例的 `/mcp/` 读取和修改文档排版、直接导�
 
 支持 `PYGMALION_API_ONLY`、`PYGMALION_HOST`、`PYGMALION_PORT`、`PYGMALION_DRY_RUN`、`PYGMALION_HOME`、`PYGMALION_FONTS_DIR`。运行数据根目录默认是仓库；使用 `--data-home` 指定另一目录时，默认从该目录下的 `model-bin/` 读取字体；也可用 `--fonts-dir` 或 `PYGMALION_FONTS_DIR` 独立指定字体数据集父目录，无需复制字库。字体只支持 Hugging Face Parquet 数据集，不再读取 JSON、CNC Draw 或内置几何/西文字库。`.env.example` 提供示例，VS Code 调试配置读取 `.env`。
 
+### 系统服务
+
+`deploy/systemd/pygmalion.service` 是系统服务模板，安装前请复制到仓库外，将副本中的 `@SERVICE_USER@`、`@PROJECT_ROOT@` 和 `@PYTHON@` 替换为运行用户、项目目录和 Poetry 虚拟环境中的 Python 可执行文件。安装前运行 `poetry install` 和 `pnpm --dir src/web run build`。服务默认监听 18080，运行数据目录使用项目目录；请按实际部署环境调整。
+
+```bash
+cp deploy/systemd/pygmalion.service /tmp/pygmalion.service
+# 在 /tmp/pygmalion.service 中填入本机参数后，安装并启用服务
+sudo install -m 644 /tmp/pygmalion.service /etc/systemd/system/pygmalion.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now pygmalion.service
+systemctl status pygmalion.service
+journalctl -u pygmalion.service -f
+```
+
+服务只监听一个端口。默认运行 `poetry run app serve` 时使用 HTTP；需要 HTTPS 时，同时设置 `PYGMALION_TLS_CERT` 和 `PYGMALION_TLS_KEY`（或传入 `--tls-cert` 和 `--tls-key`），证书或私钥缺失时启动会报错。systemd 部署时可在本机服务文件中设置这两个变量。证书和私钥不应提交到仓库；客户端必须信任证书的签发机构，且访问地址须与证书匹配。
+
+更新代码并重新构建前端后，运行 `sudo systemctl restart pygmalion.service`；停止服务使用 `sudo systemctl stop pygmalion.service`。服务启动不会自动提交书写任务。
+
 内置字库使用标准 Hugging Face 数据集目录 `model-bin/cjk-medians/`，包含 `train.parquet`、`README.md` 和 `ARPHICPL.TXT`。Parquet 使用 Zstd 压缩和四位小数的定点整数，约 1.61 MiB，无损保留全部字形与笔顺。该目录已被 Git 忽略，新检出或部署时须单独提供，缺失时应用会提示缺字。
 
 ```python

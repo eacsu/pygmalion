@@ -1,3 +1,4 @@
+import { randomId } from "./uuid";
 import { validateCircuit, type CircuitElement } from "./circuit";
 export interface TextStyle {
   font: string;
@@ -67,7 +68,7 @@ export function newVector(
   return {
     ...data,
     type: "vector",
-    id: crypto.randomUUID(),
+    id: randomId(),
     lock_aspect: true,
     pen_width_mm: 0.3,
     fill_spacing_mm: 0.24,
@@ -145,7 +146,7 @@ export function newText(
   return {
     ...defaultStyle,
     font_size_mm: fontSize,
-    id: crypto.randomUUID(),
+    id: randomId(),
     type: "text",
     text,
     align: "left",
@@ -178,7 +179,7 @@ export function newTable(
   return {
     ...defaultStyle,
     font_size_mm: fontSize,
-    id: crypto.randomUUID(),
+    id: randomId(),
     type: "table",
     x_mm: position.x,
     y_mm: position.y,

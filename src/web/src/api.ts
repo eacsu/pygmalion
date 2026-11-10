@@ -1,3 +1,4 @@
+import { randomId } from "./uuid";
 import { useCallback, useEffect, useState } from "react";
 
 export type JobStatus =
@@ -248,7 +249,7 @@ export async function deviceOperation(
   let operation = await idempotent<PublicOperation>(
     path,
     data,
-    crypto.randomUUID(),
+    randomId(),
     signal,
   );
   const deadline = Date.now() + 75000;
@@ -306,7 +307,7 @@ export async function submitPlan(
   const receipt: { key: string; body: { plan_id: string; mode: Mode } } =
     previous
       ? JSON.parse(previous)
-      : { key: crypto.randomUUID(), body: { plan_id, mode } };
+      : { key: randomId(), body: { plan_id, mode } };
   localStorage.setItem(storageKey, JSON.stringify(receipt));
   try {
     const result = await idempotent<PublicJob>(
