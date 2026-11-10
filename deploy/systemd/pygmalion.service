@@ -1,0 +1,18 @@
+[Unit]
+Description=Pygmalion handwriting workspace
+After=network.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@PROJECT_ROOT@
+Environment=PYTHONUNBUFFERED=1
+Environment=PYGMALION_HOME=@PROJECT_ROOT@
+Environment=PYGMALION_PORT=18080
+# For HTTPS, add PYGMALION_TLS_CERT and PYGMALION_TLS_KEY here.
+ExecStart=@PYTHON@ -m pygmalion.commands.app serve
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

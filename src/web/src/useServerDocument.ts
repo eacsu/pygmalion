@@ -1,3 +1,4 @@
+import { randomId } from "./uuid";
 import {
   useCallback,
   useEffect,
@@ -80,7 +81,7 @@ export function useServerDocument(
   const flight = useRef<Promise<void> | undefined>(undefined);
   const initialized = useRef(false);
   const switching = useRef(false);
-  const key = useRef(crypto.randomUUID());
+  const key = useRef(randomId());
 
   const persistRecovery = useCallback(() => {
     const value = current.current;
@@ -313,7 +314,7 @@ export function useServerDocument(
         "POST",
         readDocument(doc),
         undefined,
-        { "Idempotency-Key": crypto.randomUUID() },
+        { "Idempotency-Key": randomId() },
       );
       adopt(value);
     } finally {
